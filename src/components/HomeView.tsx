@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
 import { PlayCircle, Play, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Modal } from './Modal';
-import { isWeChat, copyToClipboard, setupWeChatShare, injectWeChatSDK } from '../lib/shareUtils';
+import { isWeChat, copyToClipboard, setupShareMetadata } from '../lib/shareUtils';
 import { ShareHint } from './WeChatShareHint';
+import { getFeaturedWorks, getPortfolioItems, getHomeContent, getCategoriesWithDetails, PortfolioItem, HomeContent, CategoryWithDetails } from '../data/store';
 
 const coreBusiness = [
   {
@@ -80,11 +81,41 @@ const featuredWorks = [
 ];
 
 export function HomeView() {
-  const [selectedItem, setSelectedItem] = useState<typeof coreBusiness[0] | typeof featuredWorks[0] | null>(null);
+  const [selectedItem, setSelectedItem] = useState<typeof coreBusiness[0] | (PortfolioItem & { featuredId: string }) | (CategoryWithDetails & { id: string }) | null>(null);
   const [isWeChatHintVisible, setIsWeChatHintVisible] = useState(false);
+  const [featuredItems, setFeaturedItems] = useState<(PortfolioItem & { featuredId: string })[]>([]);
+  const [homeContent, setHomeContent] = useState<HomeContent>({
+    heroTitle: '',
+    heroSubtitle: '',
+    heroImage: '',
+    aboutTitle: '',
+    aboutContent: ''
+  });
+  const [categories, setCategories] = useState<CategoryWithDetails[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Initial deep link detection
+  useEffect(() => {
+    const portfolioItems = getPortfolioItems();
+    const featuredWorks = getFeaturedWorks();
+    const items = featuredWorks
+      .map(fw => {
+        const item = portfolioItems.find(pi => pi.id === fw.portfolioId);
+        if (item) {
+          return { ...item, featuredId: fw.id };
+        }
+        return null;
+      })
+      .filter((item): item is PortfolioItem & { featuredId: string } => item !== null)
+      .sort((a, b) => {
+        const aOrder = getFeaturedWorks().find(fw => fw.id === a.featuredId)?.sortOrder || 0;
+        const bOrder = getFeaturedWorks().find(fw => fw.id === b.featuredId)?.sortOrder || 0;
+        return aOrder - bOrder;
+      });
+    setFeaturedItems(items);
+    setHomeContent(getHomeContent());
+    setCategories(getCategoriesWithDetails());
+  }, []);
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const id = params.get('id');
@@ -93,12 +124,11 @@ export function HomeView() {
         const item = coreBusiness.find(b => b.id === id);
         if (item) setSelectedItem(item);
       } else if (id.startsWith('fw')) {
-        const item = featuredWorks.find(w => w.id === id);
+        const item = featuredItems.find(w => w.featuredId === id);
         if (item) setSelectedItem(item);
       }
     }
-    injectWeChatSDK();
-  }, []);
+  }, [featuredItems]);
 
   // Update URL on selection
   useEffect(() => {
@@ -110,16 +140,24 @@ export function HomeView() {
     }
     window.history.replaceState({}, '', url.toString());
 
-    // Update WeChat share metadata if selected
+    // Update share metadata if selected
     if (selectedItem) {
-      setupWeChatShare({
-        title: selectedItem.title,
-        desc: selectedItem.category,
+      setupShareMetadata({
+        title: ('name' in selectedItem ? selectedItem.name : selectedItem.title),
+        desc: ('category' in selectedItem ? selectedItem.category : '大连柒子文化'),
         link: url.toString(),
-        imgUrl: selectedItem.img
+        imgUrl: ('coverImage' in selectedItem ? selectedItem.coverImage : selectedItem.img)
+      });
+    } else {
+      // Restore default share metadata when closing
+      setupShareMetadata({
+        title: '大连柒子文化发展有限公司',
+        desc: '诚信立足 创新致远',
+        link: url.toString(),
+        imgUrl: homeContent.hero?.cover || ''
       });
     }
-  }, [selectedItem]);
+  }, [selectedItem, homeContent]);
 
   const handleShare = async () => {
     if (!selectedItem) return;
@@ -154,11 +192,12 @@ export function HomeView() {
         <div className="absolute top-0 right-0 w-96 h-96 bg-primary/10 blur-[120px] -z-10"></div>
         
         <div className="flex-1 space-y-6">
-          <h2 className="font-headline text-4xl sm:text-5xl lg:text-7xl font-bold leading-[1.1] tracking-tight text-on-surface">
-            开启未来的<br /><span className="text-gradient">视界 Matrix</span>
-          </h2>
+          <h2 
+            className="font-headline text-4xl sm:text-5xl lg:text-7xl font-bold leading-[1.1] tracking-tight text-on-surface"
+            dangerouslySetInnerHTML={{ __html: homeContent.heroTitle || '开启未来的<br /><span className="text-gradient">视界 Matrix</span>' }}
+          />
           <p className="font-body text-on-surface-variant text-lg lg:text-xl leading-relaxed max-w-xl">
-            通过 AIGC 重新定义数字影像。我们将人类的情感与神经计算相结合，打造跨越维度的奇迹。
+            {homeContent.heroSubtitle || '通过 AIGC 重新定义数字影像。我们将人类的情感与神经计算相结合，打造跨越维度的奇迹。'}
           </p>
         </div>
 
@@ -208,28 +247,58 @@ export function HomeView() {
             ref={scrollRef}
             className="flex overflow-x-auto hide-scrollbar gap-4 pb-4 -mx-6 px-6 scroll-smooth"
           >
-            {coreBusiness.map((item) => (
-              <div 
-                key={item.id}
-                onClick={() => setSelectedItem(item)}
-                className="min-w-[280px] w-[280px] shrink-0 rounded-2xl overflow-hidden surface-container-low border border-outline-variant/10 shadow-xl cursor-pointer transition-transform active:scale-95"
-              >
-                <div className="h-40 relative">
-                  <img
-                    className="w-full h-full object-cover"
-                    alt={item.title}
-                    src={item.img}
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-surface-container-low via-transparent to-transparent"></div>
+            {categories.length > 0 ? (
+              categories.map((item) => (
+                <div 
+                  key={item.id}
+                  onClick={() => setSelectedItem(item)}
+                  className="min-w-[280px] w-[280px] shrink-0 rounded-2xl overflow-hidden surface-container-low border border-outline-variant/10 shadow-xl cursor-pointer transition-transform active:scale-95"
+                >
+                  <div className="h-40 relative">
+                    <img
+                      className="w-full h-full object-cover"
+                      alt={item.name}
+                      src={item.coverImage}
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-surface-container-low via-transparent to-transparent"></div>
+                    {item.icon && (
+                      <div className="absolute bottom-3 right-3 w-12 h-12 rounded-xl bg-surface-container-low/90 backdrop-blur-sm flex items-center justify-center border border-white/10">
+                        <div dangerouslySetInnerHTML={{ __html: item.icon }} className={`w-6 h-6 ${item.color || 'text-primary'}`} />
+                      </div>
+                    )}
+                  </div>
+                  <div className="p-5">
+                    <h4 className="font-headline text-lg font-bold text-on-surface mb-2">{item.name}</h4>
+                    <p className="font-body text-on-surface-variant text-xs leading-relaxed line-clamp-3">
+                      {item.description}
+                    </p>
+                  </div>
                 </div>
-                <div className="p-5">
-                  <h4 className="font-headline text-lg font-bold text-on-surface mb-2">{item.title}</h4>
-                  <p className="font-body text-on-surface-variant text-xs leading-relaxed line-clamp-3">
-                    {item.shortDesc}
-                  </p>
+              ))
+            ) : (
+              coreBusiness.map((item) => (
+                <div 
+                  key={item.id}
+                  onClick={() => setSelectedItem(item)}
+                  className="min-w-[280px] w-[280px] shrink-0 rounded-2xl overflow-hidden surface-container-low border border-outline-variant/10 shadow-xl cursor-pointer transition-transform active:scale-95"
+                >
+                  <div className="h-40 relative">
+                    <img
+                      className="w-full h-full object-cover"
+                      alt={item.title}
+                      src={item.img}
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-surface-container-low via-transparent to-transparent"></div>
+                  </div>
+                  <div className="p-5">
+                    <h4 className="font-headline text-lg font-bold text-on-surface mb-2">{item.title}</h4>
+                    <p className="font-body text-on-surface-variant text-xs leading-relaxed line-clamp-3">
+                      {item.shortDesc}
+                    </p>
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </div>
       </section>
@@ -243,12 +312,13 @@ export function HomeView() {
           </div>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-8">
-          {featuredWorks.map((work) => (
-            <div 
-              key={work.id}
-              onClick={() => setSelectedItem(work)}
-              className="relative group cursor-pointer"
-            >
+          {featuredItems.length > 0 ? (
+            featuredItems.map((work) => (
+              <div 
+                key={work.featuredId}
+                onClick={() => setSelectedItem(work)}
+                className="relative group cursor-pointer"
+              >
               <div className="aspect-[16/10] rounded-2xl overflow-hidden shadow-2xl relative border border-white/5">
                 <img
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-1000"
@@ -275,7 +345,12 @@ export function HomeView() {
                 <h4 className="font-headline text-xl font-bold group-hover:text-primary transition-colors">{work.title}</h4>
               </div>
             </div>
-          ))}
+            ))
+          ) : (
+            <div className="col-span-full text-center py-12">
+              <p className="text-on-surface-variant">暂无精选作品</p>
+            </div>
+          )}
         </div>
       </section>
 
@@ -288,10 +363,14 @@ export function HomeView() {
       </footer>
 
       {/* Detail Modal */}
-      <Modal isOpen={!!selectedItem} onClose={() => setSelectedItem(null)} onShare={handleShare}>
+      <Modal 
+        isOpen={!!selectedItem} 
+        onClose={() => setSelectedItem(null)} 
+        onShare={(!selectedItem || 'name' in selectedItem) ? undefined : handleShare}
+      >
         {selectedItem && (
           <div className="flex flex-col h-full relative">
-            <div className={`absolute top-0 left-0 w-full h-64 ${selectedItem.bgGlow} blur-[80px] -z-10 opacity-50`}></div>
+            <div className={`absolute top-0 left-0 w-full h-64 ${selectedItem.bgGlow || 'bg-primary/20'} blur-[80px] -z-10 opacity-50`}></div>
             <div className="relative aspect-video shrink-0 bg-black">
               {('videoUrl' in selectedItem && selectedItem.videoUrl) ? (
                 <video 
@@ -305,7 +384,11 @@ export function HomeView() {
                 />
               ) : (
                 <>
-                  <img src={selectedItem.img} alt={selectedItem.title} className="w-full h-full object-cover" />
+                  <img 
+                    src={('coverImage' in selectedItem ? selectedItem.coverImage : selectedItem.img) || 'https://neeko-copilot.bytedance.net/api/text_to_image?prompt=professional%20digital%20art%20studio%20logo&image_size=square'} 
+                    alt={('name' in selectedItem ? selectedItem.name : selectedItem.title)} 
+                    className="w-full h-full object-cover" 
+                  />
                   {('type' in selectedItem && selectedItem.type === 'video') && (
                     <div className="absolute inset-0 flex items-center justify-center bg-black/30">
                       <div className="w-16 h-16 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center border border-white/30">
@@ -319,17 +402,17 @@ export function HomeView() {
             </div>
             <div className="p-6 flex-1 flex flex-col -mt-8 relative z-10">
               <div className="flex items-center gap-2 mb-4">
-                <span className={`px-2 py-0.5 rounded-sm bg-black/40 border border-white/10 text-[10px] font-label uppercase tracking-wider ${selectedItem.color}`}>
-                  {selectedItem.category}
+                <span className={`px-2 py-0.5 rounded-sm bg-black/40 border border-white/10 text-[10px] font-label uppercase tracking-wider ${selectedItem.color || 'text-primary'}`}>
+                  {('category' in selectedItem ? selectedItem.category : '核心业务')}
                 </span>
                 <span className="px-2 py-0.5 rounded-sm bg-black/40 border border-white/10 text-white/70 text-[10px] font-label uppercase tracking-wider">
                   {selectedItem.tag}
                 </span>
               </div>
-              <h3 className="text-2xl font-headline font-bold text-on-surface mb-6">{selectedItem.title}</h3>
+              <h3 className="text-2xl font-headline font-bold text-on-surface mb-6">{('name' in selectedItem ? selectedItem.name : selectedItem.title)}</h3>
               <div className="w-12 h-[1px] bg-white/20 mb-6"></div>
               <p className="text-on-surface-variant leading-relaxed font-body text-sm">
-                {selectedItem.fullDesc}
+                {('description' in selectedItem ? selectedItem.description : selectedItem.fullDesc)}
               </p>
             </div>
           </div>

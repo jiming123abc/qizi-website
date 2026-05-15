@@ -12,33 +12,102 @@ import { TeamView } from './components/TeamView';
 import { ServicesView } from './components/ServicesView';
 import { PortfolioView } from './components/PortfolioView';
 import { SearchView } from './components/SearchView';
+import { AdminLayout } from './components/admin/AdminLayout';
+import { Dashboard } from './components/admin/Dashboard';
+import { PortfolioAdmin } from './components/admin/PortfolioAdmin';
+import { CategoriesAdmin } from './components/admin/CategoriesAdmin';
+import { FeaturedAdmin } from './components/admin/FeaturedAdmin';
+import { HomeContentAdmin } from './components/admin/HomeContentAdmin';
+import { TeamAdmin } from './components/admin/TeamAdmin';
+import { Login } from './components/admin/Login';
+import { Settings } from 'lucide-react';
+import { setupShareMetadata } from './lib/shareUtils';
+import { getHomeContent } from './data/store';
 
 type Tab = 'home' | 'team' | 'services' | 'portfolio' | 'search';
+type AdminTab = 'dashboard' | 'portfolio' | 'categories' | 'featured' | 'home' | 'team';
+
+const ADMIN_PASSWORD = 'admin123';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('home');
   const [searchQuery, setSearchQuery] = useState('');
+  const [isAdminMode, setIsAdminMode] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [adminTab, setAdminTab] = useState<AdminTab>('dashboard');
 
-  // Handle direct sharing links
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const id = params.get('id');
     if (id) {
-      // If the ID looks like a portfolio item ID (simple number) or a featured work ID (starts with fw)
       if (id.startsWith('fw')) {
         setActiveTab('home');
       } else {
         setActiveTab('portfolio');
       }
     }
+
+    const admin = params.get('admin');
+    if (admin === 'true') {
+      setIsAdminMode(true);
+    }
   }, []);
+
+  useEffect(() => {
+    const homeContent = getHomeContent();
+    const defaultImage = homeContent.hero?.cover || 'https://neeko-copilot.bytedance.net/api/text_to_image?prompt=professional%20digital%20art%20studio%20logo%20with%20modern%20design&image_size=square';
+    
+    setupShareMetadata({
+      title: '大连柒子文化发展有限公司',
+      desc: '诚信立足 创新致远',
+      link: window.location.href,
+      imgUrl: defaultImage
+    });
+  }, [activeTab]);
 
   const handleSearch = (query: string) => {
     setSearchQuery(query);
     setActiveTab('search');
   };
 
+  const handleLogin = (password: string): boolean => {
+    if (password === ADMIN_PASSWORD) {
+      setIsLoggedIn(true);
+      return true;
+    }
+    return false;
+  };
+
+  const handleLogout = () => {
+    setIsLoggedIn(false);
+    setIsAdminMode(false);
+    const url = new URL(window.location.href);
+    url.searchParams.delete('admin');
+    window.history.replaceState({}, '', url.toString());
+  };
+
   const navTab = activeTab === 'search' ? 'home' : activeTab;
+
+  if (isAdminMode) {
+    if (!isLoggedIn) {
+      return <Login onLogin={handleLogin} />;
+    }
+
+    return (
+      <AdminLayout 
+        activeTab={adminTab} 
+        onTabChange={setAdminTab}
+        onLogout={handleLogout}
+      >
+        {adminTab === 'dashboard' && <Dashboard />}
+        {adminTab === 'home' && <HomeContentAdmin />}
+        {adminTab === 'portfolio' && <PortfolioAdmin />}
+        {adminTab === 'featured' && <FeaturedAdmin />}
+        {adminTab === 'categories' && <CategoriesAdmin />}
+        {adminTab === 'team' && <TeamAdmin />}
+      </AdminLayout>
+    );
+  }
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -60,8 +129,20 @@ export default function App() {
         <div className="md:hidden">
           <BottomNavBar activeTab={navTab} onTabChange={setActiveTab} />
         </div>
+
+        <button
+          onClick={() => {
+            setIsAdminMode(true);
+            const url = new URL(window.location.href);
+            url.searchParams.set('admin', 'true');
+            window.history.replaceState({}, '', url.toString());
+          }}
+          className="hidden md:flex fixed bottom-6 right-6 p-3 rounded-full bg-primary text-on-primary shadow-lg hover:bg-primary/90 transition-all hover:scale-110 z-50"
+          title="管理后台"
+        >
+          <Settings className="w-5 h-5" />
+        </button>
       </div>
     </div>
   );
 }
-

@@ -1,55 +1,68 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Modal } from './Modal';
-
-const teamMembers = [
-  {
-    id: 1,
-    name: 'Aris Vane',
-    role: 'Chief Architect',
-    shortDesc: 'Neural network optimization and ethereal render engine lead.',
-    fullDesc: 'Aris Vane is the visionary behind the Septem Ethereal Engine. With a background in quantum computing and neural aesthetics, Aris bridges the gap between raw data and cinematic beauty. His work focuses on optimizing generative models to run with near-zero latency while maintaining 8K resolution fidelity. He previously led the AI graphics division at a top-tier tech firm before founding Septem.',
-    img: 'https://lh3.googleusercontent.com/aida-public/AB6AXuBI1wLmLAavWwY3sjC6VvvnHv7Z-TOXQQAti5URfUduUmhgIZN5oP6jzt9G7hgjKoUAZ3KM2VnBM8YHS7cLvSVd58U9K27-iH9y_5EZKDmhQDu3BoyoJSZ7pUNDSjzLDHH-7eg_c9Joe-Hzc66htw_tbBcJepN2ohMibJ4SwTaJfQh-iHrL9nBC_6j9P8XE_Q75ucsbOet99h4DQXzbfKvfYQgDWzEImpfhySOQuoMp93xQrGNg_b6D6fU7kHhfuE6DlRV_BVnbkW8',
-    color: 'text-primary',
-    bgGlow: 'bg-primary/20'
-  },
-  {
-    id: 2,
-    name: 'Kaelen Thorne',
-    role: 'Visual Director',
-    shortDesc: 'Mastermind behind the cinematic aesthetic of Septem Vision.',
-    fullDesc: 'Kaelen Thorne brings over a decade of experience in Hollywood VFX and digital cinematography. At Septem, Kaelen ensures that every AI-generated frame adheres to strict cinematic principles—from lighting and composition to color grading. Kaelen\'s unique approach blends traditional film theory with cutting-edge neural rendering.',
-    img: 'https://lh3.googleusercontent.com/aida-public/AB6AXuC1GdXuj4dFpNkePTtOpw7nSbzX_T-pdq7KAN270cZTwWFiykDjInCUjZopaRQB_14SeKcZqkjfMqeNeGCh5mtIA5WnSl3-Y5ygw4FopihOIv9ONvtU1Ti4Qy7qQ4hiW9yIVnAPwlJCzoKtBhFvXFa3stdrU3aoFBpgYodb2k_VCtEJ044PlzX23gHxVGrdss2-WWVpwDVB-VT4SAw7AsX8KcxHJGTnLRj90AMnCwCxix-lFW9dZv10aidhwnDS-3v3jeha-XmMBSs',
-    color: 'text-secondary',
-    bgGlow: 'bg-secondary/20'
-  },
-  {
-    id: 3,
-    name: 'Soren Jinx',
-    role: 'AI Strategist',
-    shortDesc: 'Directing the evolution of generative models for narrative flow.',
-    fullDesc: 'Soren Jinx focuses on the narrative capabilities of AI. By fine-tuning large language models and multimodal systems, Soren creates AI agents capable of generating coherent, emotionally resonant storyboards and scripts. Soren\'s research pushes the boundaries of how machines understand and replicate human storytelling.',
-    img: 'https://lh3.googleusercontent.com/aida-public/AB6AXuBOQG4oEscoDTBKYA2bdCfjet5PJvLzkPYu8eRRrxB_fRamIVilSSHS1ROD-tMQqpxce4b0dlD8jXdSU0xMl4yr38lZOQrtw6sbai5-ilaZ5n_SdGIk2-Hmg6zTL3FurRhz_I15KmIq5EpHTao9HkE1v-tpNjc6NqSLcV7dMsCdQXeTTHdnwuL0JXZsuionTaAOTKfnDsDp8QRAXM7mOyG7iLz4yd27mjMvHUdBsvsfcuETC7vO_2lDG1BdR9p3OsDpElwDb_u_ZUQ',
-    color: 'text-tertiary',
-    bgGlow: 'bg-tertiary/20'
-  },
-  {
-    id: 4,
-    name: 'Elena Ross',
-    role: 'Fluid Dynamics',
-    shortDesc: 'Expert in digital atmospheric effects and particle systems.',
-    fullDesc: 'Elena Ross is the wizard behind the ethereal particles, smoke, and fluid simulations that give Septem\'s visuals their signature look. Leveraging AI to predict fluid behavior, Elena creates hyper-realistic atmospheric effects that would traditionally take days to render, achieving them in real-time.',
-    img: 'https://lh3.googleusercontent.com/aida-public/AB6AXuDOvvhfCyWH2_JgmDHVYpAMLDUM0qtFHntKzaMQTC8rrG_NPLjGlfRNdr3p_apTOnZ1wNRaIO7EHg6tqGtgGpYrxVQBJKUwYYsIDOsIT1IsM9HLrtuagCQeFcCrAYkBCMBmiHEkBS-ymq3SInArlfqQe5ZHgrdknhizEwBsL5yY7N-2de8GgObO4go0DXxRA0aY4FyeSwT9UXbusN7KGSMtu73ZJEPfooopfz-PliXD-T4ue7sMGuUvpKaYV2zC_oF81BGwz4vGeC8',
-    color: 'text-primary-dim',
-    bgGlow: 'bg-primary-dim/20'
-  }
-];
+import { getTeamMembers, TeamMember } from '../data/store';
 
 export function TeamView() {
-  const [selectedMember, setSelectedMember] = useState<typeof teamMembers[0] | null>(null);
+  const [selectedMember, setSelectedMember] = useState<(TeamMember & { fullDesc?: string }) | null>(null);
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+
+  useEffect(() => {
+    setTeamMembers(getTeamMembers());
+  }, []);
+
+  const getMemberColor = (index: number) => {
+    const colors = ['text-primary', 'text-secondary', 'text-tertiary', 'text-primary-dim'];
+    return colors[index % colors.length];
+  };
+
+  const getMemberBgGlow = (index: number) => {
+    const glows = ['bg-primary/20', 'bg-secondary/20', 'bg-tertiary/20', 'bg-primary-dim/20'];
+    return glows[index % glows.length];
+  };
+
+  const defaultMembers = [
+    {
+      id: 1,
+      name: 'Aris Vane',
+      role: 'Chief Architect',
+      bio: 'Neural network optimization and ethereal render engine lead.',
+      fullDesc: 'Aris Vane is the visionary behind the Septem Ethereal Engine. With a background in quantum computing and neural aesthetics, Aris bridges the gap between raw data and cinematic beauty. His work focuses on optimizing generative models to run with near-zero latency while maintaining 8K resolution fidelity. He previously led the AI graphics division at a top-tier tech firm before founding Septem.',
+      avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuBI1wLmLAavWwY3sjC6VvvnHv7Z-TOXQQAti5URfUduUmhgIZN5oP6jzt9G7hgjKoUAZ3KM2VnBM8YHS7cLvSVd58U9K27-iH9y_5EZKDmhQDu3BoyoJSZ7pUNDSjzLDHH-7eg_c9Joe-Hzc66htw_tbBcJepN2ohMibJ4SwTaJfQh-iHrL9nBC_6j9P8XE_Q75ucsbOet99h4DQXzbfKvfYQgDWzEImpfhySOQuoMp93xQrGNg_b6D6fU7kHhfuE6DlRV_BVnbkW8',
+      sortOrder: 1
+    },
+    {
+      id: 2,
+      name: 'Kaelen Thorne',
+      role: 'Visual Director',
+      bio: 'Mastermind behind the cinematic aesthetic of Septem Vision.',
+      fullDesc: 'Kaelen Thorne brings over a decade of experience in Hollywood VFX and digital cinematography. At Septem, Kaelen ensures that every AI-generated frame adheres to strict cinematic principles—from lighting and composition to color grading. Kaelen\'s unique approach blends traditional film theory with cutting-edge neural rendering.',
+      avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuC1GdXuj4dFpNkePTtOpw7nSbzX_T-pdq7KAN270cZTwWFiykDjInCUjZopaRQB_14SeKcZqkjfMqeNeGCh5mtIA5WnSl3-Y5ygw4FopihOIv9ONvtU1Ti4Qy7qQ4hiW9yIVnAPwlJCzoKtBhFvXFa3stdrU3aoFBpgYodb2k_VCtEJ044PlzX23gHxVGrdss2-WWVpwDVB-VT4SAw7AsX8KcxHJGTnLRj90AMnCwCxix-lFW9dZv10aidhwnDS-3v3jeha-XmMBSs',
+      sortOrder: 2
+    },
+    {
+      id: 3,
+      name: 'Soren Jinx',
+      role: 'AI Strategist',
+      bio: 'Directing the evolution of generative models for narrative flow.',
+      fullDesc: 'Soren Jinx focuses on the narrative capabilities of AI. By fine-tuning large language models and multimodal systems, Soren creates AI agents capable of generating coherent, emotionally resonant storyboards and scripts. Soren\'s research pushes the boundaries of how machines understand and replicate human storytelling.',
+      avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuBOQG4oEscoDTBKYA2bdCfjet5PJvLzkPYu8eRRrxB_fRamIVilSSHS1ROD-tMQqpxce4b0dlD8jXdSU0xMl4yr38lZOQrtw6sbai5-ilaZ5n_SdGIk2-Hmg6zTL3FurRhz_I15KmIq5EpHTao9HkE1v-tpNjc6NqSLcV7dMsCdQXeTTHdnwuL0JXZsuionTaAOTKfnDsDp8QRAXM7mOyG7iLz4yd27mjMvHUdBsvsfcuETC7vO_2lDG1BdR9p3OsDpElwDb_u_ZUQ',
+      sortOrder: 3
+    },
+    {
+      id: 4,
+      name: 'Elena Ross',
+      role: 'Fluid Dynamics',
+      bio: 'Expert in digital atmospheric effects and particle systems.',
+      fullDesc: 'Elena Ross is the wizard behind the ethereal particles, smoke, and fluid simulations that give Septem\'s visuals their signature look. Leveraging AI to predict fluid behavior, Elena creates hyper-realistic atmospheric effects that would traditionally take days to render, achieving them in real-time.',
+      avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuDOvvhfCyWH2_JgmDHVYpAMLDUM0qtFHntKzaMQTC8rrG_NPLjGlfRNdr3p_apTOnZ1wNRaIO7EHg6tqGtgGpYrxVQBJKUwYYsIDOsIT1IsM9HLrtuagCQeFcCrAYkBCMBmiHEkBS-ymq3SInArlfqQe5ZHgrdknhizEwBsL5yY7N-2de8GgObO4go0DXxRA0aY4FyeSwT9UXbusN7KGSMtu73ZJEPfooopfz-PliXD-T4ue7sMGuUvpKaYV2zC_oF81BGwz4vGeC8',
+      sortOrder: 4
+    }
+  ];
+
+  const displayMembers = teamMembers.length > 0 ? teamMembers : defaultMembers;
 
   return (
     <div className="flex-grow pt-20 pb-32 lg:pb-12 px-6 space-y-16">
-      {/* High-Impact Hero Header */}
       <section className="relative pt-6 md:pt-12">
         <div className="absolute top-0 right-0 w-64 h-64 bg-primary/10 rounded-full blur-[100px] -z-10"></div>
         <div className="max-w-3xl space-y-8">
@@ -65,7 +78,6 @@ export function TeamView() {
         </div>
       </section>
 
-      {/* Team Members Section */}
       <section className="space-y-8">
         <div className="flex items-end justify-between border-b border-white/10 pb-4">
           <div>
@@ -75,27 +87,27 @@ export function TeamView() {
           <span className="font-label text-[10px] text-outline hidden md:block">SELECT TO EXPLORE PROTOCOL</span>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-6">
-          {teamMembers.map((member) => (
+          {displayMembers.map((member, index) => (
             <button
               key={member.id}
-              onClick={() => setSelectedMember(member)}
+              onClick={() => setSelectedMember({ ...member, fullDesc: defaultMembers.find(m => m.id === member.id)?.fullDesc || '' })}
               className="w-full text-left group relative bg-surface-container-low rounded-2xl overflow-hidden border border-white/5 flex h-48 transition-all hover:bg-white/5 active:scale-[0.98]"
             >
               <div className="w-2/5 h-full relative overflow-hidden">
                 <img
                   alt={member.name}
                   className="w-full h-full object-cover grayscale brightness-75 group-hover:grayscale-0 group-hover:scale-110 transition-all duration-700"
-                  src={member.img}
+                  src={member.avatar}
                 />
                 <div className="absolute inset-0 bg-gradient-to-r from-transparent to-surface-container-low" />
               </div>
               <div className="w-3/5 p-6 flex flex-col justify-center space-y-2">
-                <p className={`font-label text-[10px] tracking-[0.2em] uppercase ${member.color}`}>
+                <p className={`font-label text-[10px] tracking-[0.2em] uppercase ${getMemberColor(index)}`}>
                   {member.role}
                 </p>
                 <h4 className="text-xl font-headline font-bold text-on-surface group-hover:text-primary transition-colors">{member.name}</h4>
                 <p className="text-xs text-on-surface-variant leading-relaxed line-clamp-3">
-                  {member.shortDesc}
+                  {member.bio}
                 </p>
               </div>
             </button>
@@ -103,14 +115,11 @@ export function TeamView() {
         </div>
       </section>
 
-      {/* Evolution Timeline */}
       <section className="space-y-8">
         <h3 className="text-xl font-headline font-bold tracking-tight">团队研发历程</h3>
         <div className="relative pl-8 space-y-10">
-          {/* Timeline Thread */}
           <div className="absolute left-[3px] top-0 bottom-0 w-[2px] bg-gradient-to-b from-primary via-secondary to-transparent"></div>
 
-          {/* 2022 */}
           <div className="relative">
             <div className="absolute -left-[32px] top-1.5 w-4 h-4 rounded-full bg-background border-2 border-primary shadow-[0_0_10px_rgba(186,158,255,0.5)]"></div>
             <div className="space-y-1">
@@ -120,58 +129,61 @@ export function TeamView() {
             </div>
           </div>
 
-          {/* 2023 */}
           <div className="relative">
-            <div className="absolute -left-[32px] top-1.5 w-4 h-4 rounded-full bg-background border-2 border-secondary shadow-[0_0_10px_rgba(83,221,252,0.5)]"></div>
+            <div className="absolute -left-[32px] top-1.5 w-4 h-4 rounded-full bg-background border-2 border-secondary shadow-[0_0_10px_rgba(126,255,175,0.5)]"></div>
             <div className="space-y-1">
               <span className="font-headline font-bold text-secondary tracking-tighter text-sm">2023</span>
-              <h5 className="text-on-surface font-medium">深核扩展：视觉奇点</h5>
-              <p className="text-xs text-on-surface-variant">Mainframe expansion and the launch of the first 8K generative sequence.</p>
+              <h5 className="text-on-surface font-medium">神经网络：觉醒</h5>
+              <p className="text-xs text-on-surface-variant">Development of the proprietary Septem Ethereal Engine commenced.</p>
             </div>
           </div>
 
-          {/* 2024 */}
           <div className="relative">
-            <div className="absolute -left-[32px] top-1.5 w-4 h-4 rounded-full bg-background border-2 border-tertiary shadow-[0_0_10px_rgba(236,99,255,0.5)]"></div>
+            <div className="absolute -left-[32px] top-1.5 w-4 h-4 rounded-full bg-background border-2 border-tertiary shadow-[0_0_10px_rgba(255,214,161,0.5)]"></div>
             <div className="space-y-1">
               <span className="font-headline font-bold text-tertiary tracking-tighter text-sm">2024</span>
-              <h5 className="text-on-surface font-medium">神经主权：未来矩阵</h5>
-              <p className="text-xs text-on-surface-variant">Achieving near-zero latency in neural rendering and cross-platform synergy.</p>
+              <h5 className="text-on-surface font-medium">量子飞跃：实现</h5>
+              <p className="text-xs text-on-surface-variant">First commercial deployments and major studio partnerships established.</p>
+            </div>
+          </div>
+
+          <div className="relative">
+            <div className="absolute -left-[32px] top-1.5 w-4 h-4 rounded-full bg-primary shadow-[0_0_15px_rgba(186,158,255,0.8)] animate-pulse"></div>
+            <div className="space-y-1">
+              <span className="font-headline font-bold text-primary tracking-tighter text-sm">2025</span>
+              <h5 className="text-on-surface font-medium">矩阵演化：未来</h5>
+              <p className="text-xs text-on-surface-variant">Continued innovation in real-time neural rendering and AI storytelling.</p>
             </div>
           </div>
         </div>
       </section>
 
-      {/* Footer Text */}
-      <footer className="px-8 py-12 text-center relative overflow-hidden">
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full h-[1px] bg-gradient-to-r from-transparent via-primary/30 to-transparent"></div>
-        <p className="font-body italic text-xs sm:text-sm opacity-80 leading-relaxed text-gradient whitespace-nowrap">
-          介绍已经结束了，但是我们的故事才刚开始......
-        </p>
-      </footer>
-
-      {/* Member Detail Modal */}
-      <Modal isOpen={!!selectedMember} onClose={() => setSelectedMember(null)}>
-        {selectedMember && (
-          <div className="flex flex-col h-full relative">
-            <div className={`absolute top-0 left-0 w-full h-64 ${selectedMember.bgGlow} blur-[80px] -z-10 opacity-50`}></div>
-            <div className="relative h-72 shrink-0">
-              <img src={selectedMember.img} alt={selectedMember.name} className="w-full h-full object-cover" />
-              <div className="absolute inset-0 bg-gradient-to-t from-surface-container-low via-surface-container-low/20 to-transparent"></div>
-            </div>
-            <div className="p-6 flex-1 flex flex-col -mt-12 relative z-10">
-              <h3 className="text-3xl font-headline font-bold text-on-surface mb-1">{selectedMember.name}</h3>
-              <p className={`font-label text-xs tracking-widest uppercase mb-6 ${selectedMember.color}`}>
-                {selectedMember.role}
-              </p>
-              <div className="w-12 h-[1px] bg-white/20 mb-6"></div>
-              <p className="text-on-surface-variant leading-relaxed font-body text-sm">
-                {selectedMember.fullDesc}
-              </p>
+      {selectedMember && (
+        <Modal onClose={() => setSelectedMember(null)}>
+          <div className="max-w-4xl w-full mx-4">
+            <div className="bg-surface-container rounded-3xl overflow-hidden border border-white/10">
+              <div className="relative h-64 overflow-hidden">
+                <img
+                  alt={selectedMember.name}
+                  className="w-full h-full object-cover"
+                  src={selectedMember.avatar}
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-surface-container via-surface-container/50 to-transparent" />
+              </div>
+              <div className="p-8 -mt-16 relative">
+                <p className={`font-label text-[10px] tracking-[0.2em] uppercase ${getMemberColor(displayMembers.findIndex(m => m.id === selectedMember.id) || 0)}`}>
+                  {selectedMember.role}
+                </p>
+                <h3 className="text-3xl font-headline font-bold text-on-surface mt-2">{selectedMember.name}</h3>
+                <div className="w-16 h-[2px] bg-gradient-to-r from-primary to-secondary mt-4 rounded-full"></div>
+                <p className="text-on-surface-variant font-body leading-relaxed mt-6">
+                  {selectedMember.fullDesc || selectedMember.bio}
+                </p>
+              </div>
             </div>
           </div>
-        )}
-      </Modal>
+        </Modal>
+      )}
     </div>
   );
 }

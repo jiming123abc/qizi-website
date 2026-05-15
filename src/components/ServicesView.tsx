@@ -81,7 +81,7 @@ const techStack = [
   },
   {
     id: 'ts4',
-    title: 'Sora / Runway',
+    title: 'Seedance',
     category: '文生视频',
     icon: Clapperboard,
     color: 'text-rose-400',
@@ -185,14 +185,6 @@ export function ServicesView() {
               <div className="absolute inset-0 bg-gradient-to-t from-surface-container-low via-surface-container-low/20 to-transparent"></div>
             </div>
             <div className="p-6 flex-1 flex flex-col -mt-8 relative z-10">
-              <div className="flex items-center gap-2 mb-4">
-                <span className={`px-2 py-0.5 rounded-sm bg-black/40 border border-white/10 text-[10px] font-label uppercase tracking-wider ${selectedItem.color}`}>
-                  {selectedItem.category}
-                </span>
-                <span className="px-2 py-0.5 rounded-sm bg-black/40 border border-white/10 text-white/70 text-[10px] font-label uppercase tracking-wider">
-                  {selectedItem.tag}
-                </span>
-              </div>
               <h3 className="text-2xl font-headline font-bold text-on-surface mb-6">{selectedItem.title}</h3>
               <div className="w-12 h-[1px] bg-white/20 mb-6"></div>
               <p className="text-on-surface-variant leading-relaxed font-body text-sm">
