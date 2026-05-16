@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { Lock, Eye, EyeOff, LogIn, AlertCircle } from 'lucide-react';
+import { Lock, Eye, EyeOff, LogIn, AlertCircle, X } from 'lucide-react';
 
 interface LoginProps {
   onLogin: (password: string) => boolean;
+  onCancel?: () => void;
 }
 
-export function Login({ onLogin }: LoginProps) {
+export function Login({ onLogin, onCancel }: LoginProps) {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
@@ -28,7 +29,16 @@ export function Login({ onLogin }: LoginProps) {
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
+      <div className="w-full max-w-md relative">
+        {onCancel && (
+          <button
+            type="button"
+            onClick={onCancel}
+            className="absolute top-0 right-0 p-2 rounded-full text-on-surface-variant hover:text-on-surface hover:bg-white/5 transition-colors"
+          >
+            <X className="w-6 h-6" />
+          </button>
+        )}
         <div className="text-center mb-8">
           <div className="w-16 h-16 rounded-2xl bg-primary/20 flex items-center justify-center mx-auto mb-4">
             <Lock className="w-8 h-8 text-primary" />

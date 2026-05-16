@@ -21,9 +21,17 @@ export function FeaturedAdmin() {
     refreshData();
   }, []);
 
-  const refreshData = () => {
-    setPortfolioItems(getPortfolioItems());
-    setFeaturedWorks(getFeaturedWorks());
+  const refreshData = async () => {
+    try {
+      const [items, works] = await Promise.all([
+        getPortfolioItems(),
+        getFeaturedWorks()
+      ]);
+      setPortfolioItems(items);
+      setFeaturedWorks(works);
+    } catch (error) {
+      console.error('Failed to refresh featured works data:', error);
+    }
   };
 
   const getFeaturedPortfolioItems = (): (PortfolioItem & { featuredId: string; sortOrder: number })[] => {

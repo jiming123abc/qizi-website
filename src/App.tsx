@@ -54,15 +54,23 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const homeContent = getHomeContent();
-    const defaultImage = homeContent.hero?.cover || 'https://neeko-copilot.bytedance.net/api/text_to_image?prompt=professional%20digital%20art%20studio%20logo%20with%20modern%20design&image_size=square';
+    const loadHomeContent = async () => {
+      try {
+        const homeContent = await getHomeContent();
+        const defaultImage = homeContent.heroImage || '/images/hero-home.png';
+        
+        setupShareMetadata({
+          title: homeContent.shareTitle || '大连柒子文化发展有限公司',
+          desc: homeContent.shareDescription || '诚信立足 创新致远',
+          link: window.location.href,
+          imgUrl: defaultImage
+        });
+      } catch (error) {
+        console.error('Failed to load home content:', error);
+      }
+    };
     
-    setupShareMetadata({
-      title: '大连柒子文化发展有限公司',
-      desc: '诚信立足 创新致远',
-      link: window.location.href,
-      imgUrl: defaultImage
-    });
+    loadHomeContent();
   }, [activeTab]);
 
   const handleSearch = (query: string) => {
@@ -86,11 +94,18 @@ export default function App() {
     window.history.replaceState({}, '', url.toString());
   };
 
+  const handleCancelLogin = () => {
+    setIsAdminMode(false);
+    const url = new URL(window.location.href);
+    url.searchParams.delete('admin');
+    window.history.replaceState({}, '', url.toString());
+  };
+
   const navTab = activeTab === 'search' ? 'home' : activeTab;
 
   if (isAdminMode) {
     if (!isLoggedIn) {
-      return <Login onLogin={handleLogin} />;
+      return <Login onLogin={handleLogin} onCancel={handleCancelLogin} />;
     }
 
     return (

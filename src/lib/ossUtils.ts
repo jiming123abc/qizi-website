@@ -16,11 +16,12 @@ export function generateOSSConfig(): OSSConfig {
   };
 }
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001';
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
 export async function uploadFileToOSS(
   file: File,
-  folder: string = 'portfolio'
+  folder: string = 'portfolio',
+  forceLocal: boolean = false
 ): Promise<string> {
   const isImage = folder === 'images';
   const endpoint = isImage ? '/api/upload/image' : '/api/upload/video';
@@ -28,39 +29,49 @@ export async function uploadFileToOSS(
   const formData = new FormData();
   formData.append('file', file);
 
+  const url = new URL(`${API_BASE_URL}${endpoint}`);
+  if (forceLocal) {
+    url.searchParams.set('forceLocal', 'true');
+  }
+
   try {
-    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    const response = await fetch(url.toString(), {
       method: 'POST',
       body: formData
     });
 
     if (!response.ok) {
       const error = await response.json();
-      throw new Error(error.error || '上传失败');
+      const uploadError: UploadError = new Error(error.message || error.error || '上传失败');
+      uploadError.ossError = error.ossError === true;
+      throw uploadError;
     }
 
     const result = await response.json();
     return result.url;
   } catch (error) {
     console.error('上传失败:', error);
+    if ((error as UploadError).ossError) {
+      throw error;
+    }
     throw new Error(`上传失败: ${(error as Error).message}`);
   }
 }
 
-export async function uploadImageToOSS(file: File): Promise<string> {
+export async function uploadImageToOSS(file: File, forceLocal: boolean = false): Promise<string> {
   const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
   if (!allowedTypes.includes(file.type)) {
     throw new Error('不支持的图片格式，请上传 JPG、PNG、WebP 或 GIF 格式');
   }
-  return uploadFileToOSS(file, 'images');
+  return uploadFileToOSS(file, 'images', forceLocal);
 }
 
-export async function uploadVideoToOSS(file: File): Promise<string> {
+export async function uploadVideoToOSS(file: File, forceLocal: boolean = false): Promise<string> {
   const allowedTypes = ['video/mp4', 'video/webm', 'video/ogg'];
   if (!allowedTypes.includes(file.type)) {
     throw new Error('不支持的视频格式，请上传 MP4、WebM 或 OGG 格式');
   }
-  return uploadFileToOSS(file, 'videos');
+  return uploadFileToOSS(file, 'videos', forceLocal);
 }
 
 export interface UploadProgress {
@@ -78,9 +89,15 @@ export interface UploadResult {
   targetBitrate?: number;
 }
 
+export interface UploadError extends Error {
+  ossError?: boolean;
+  message: string;
+}
+
 export async function uploadImage(
   file: File,
-  onProgress?: (progress: UploadProgress) => void
+  onProgress?: (progress: UploadProgress) => void,
+  forceLocal: boolean = false
 ): Promise<UploadResult> {
   const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
   if (!allowedTypes.includes(file.type)) {
@@ -94,8 +111,13 @@ export async function uploadImage(
     const formData = new FormData();
     formData.append('file', file);
 
+    const url = new URL(`${API_BASE_URL}/api/upload/image`);
+    if (forceLocal) {
+      url.searchParams.set('forceLocal', 'true');
+    }
+
     const xhr = new XMLHttpRequest();
-    xhr.open('POST', `${API_BASE_URL}/api/upload/image`);
+    xhr.open('POST', url.toString());
 
     xhr.upload.addEventListener('progress', (event) => {
       if (event.loaded && event.total) {
@@ -124,7 +146,9 @@ export async function uploadImage(
       } else {
         try {
           const error = JSON.parse(xhr.responseText);
-          reject(new Error(error.error || '上传失败'));
+          const uploadError: UploadError = new Error(error.message || error.error || '上传失败');
+          uploadError.ossError = error.ossError === true;
+          reject(uploadError);
         } catch {
           reject(new Error('上传失败'));
         }
@@ -141,7 +165,8 @@ export async function uploadImage(
 
 export async function uploadVideo(
   file: File,
-  onProgress?: (progress: UploadProgress) => void
+  onProgress?: (progress: UploadProgress) => void,
+  forceLocal: boolean = false
 ): Promise<{ url: string; coverUrl: string }> {
   const allowedTypes = ['video/mp4', 'video/webm', 'video/ogg'];
   if (!allowedTypes.includes(file.type)) {
@@ -162,8 +187,13 @@ export async function uploadVideo(
     const formData = new FormData();
     formData.append('file', file);
 
+    const url = new URL(`${API_BASE_URL}/api/upload/video`);
+    if (forceLocal) {
+      url.searchParams.set('forceLocal', 'true');
+    }
+
     const xhr = new XMLHttpRequest();
-    xhr.open('POST', `${API_BASE_URL}/api/upload/video`);
+    xhr.open('POST', url.toString());
 
     // 设置超时时间（10分钟）
     xhr.timeout = 600000;
@@ -213,7 +243,9 @@ export async function uploadVideo(
       } else {
         try {
           const error = JSON.parse(xhr.responseText);
-          reject(new Error(error.error || '上传失败'));
+          const uploadError: UploadError = new Error(error.message || error.error || '上传失败');
+          uploadError.ossError = error.ossError === true;
+          reject(uploadError);
         } catch {
           reject(new Error('上传失败'));
         }

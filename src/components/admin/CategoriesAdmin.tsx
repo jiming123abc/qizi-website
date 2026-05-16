@@ -1,4 +1,4 @@
-﻿﻿﻿﻿import { useState, useEffect } from 'react';
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿import { useState, useEffect } from 'react';
 import { Plus, GripVertical, ChevronUp, ChevronDown, Edit2, Trash2, Image, AlertCircle, Upload, Link as LinkIcon, Save, X } from 'lucide-react';
 import { getCategoriesWithDetails, addCategoryWithDetails, updateCategoryDetails, deleteCategoryWithDetails, CategoryWithDetails } from '../../data/store';
 import { uploadImageToOSS } from '../../lib/ossUtils';
@@ -19,8 +19,13 @@ export function CategoriesAdmin() {
     icon: ''
   });
 
-  const refreshCategories = () => {
-    setCategories(getCategoriesWithDetails());
+  const refreshCategories = async () => {
+    try {
+      const cats = await getCategoriesWithDetails();
+      setCategories(cats);
+    } catch (error) {
+      console.error('Failed to refresh categories:', error);
+    }
   };
 
   useEffect(() => {

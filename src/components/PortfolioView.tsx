@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
-import { Play } from 'lucide-react';
+import { Play, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Modal } from './Modal';
 import { isWeChat, copyToClipboard, setupShareMetadata } from '../lib/shareUtils';
 import { ShareHint } from './WeChatShareHint';
-import { getPortfolioItems, getCategories, getHomeContent, PortfolioItem } from '../data/store';
+import { getPortfolioItems, getCategoriesWithDetails, getHomeContent, PortfolioItem } from '../data/store';
 
 export function PortfolioView() {
   const [activeCategory, setActiveCategory] = useState('全部作品');
@@ -11,18 +11,30 @@ export function PortfolioView() {
   const [items, setItems] = useState<PortfolioItem[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [defaultImage, setDefaultImage] = useState('');
-
-  useEffect(() => {
-    setItems(getPortfolioItems());
-    setCategories(getCategories().map(c => c.name));
-    const homeContent = getHomeContent();
-    setDefaultImage(homeContent.hero?.cover || '');
-  }, []);
-
-  useEffect(() => {
-    setItems(getPortfolioItems());
-  }, []);
+  const [defaultShareTitle, setDefaultShareTitle] = useState('大连柒子文化发展有限公司');
+  const [defaultShareDescription, setDefaultShareDescription] = useState('诚信立足 创新致远');
   const [isWeChatHintVisible, setIsWeChatHintVisible] = useState(false);
+
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        const [itemsData, categoriesData, homeContentData] = await Promise.all([
+          getPortfolioItems(),
+          getCategoriesWithDetails(),
+          getHomeContent()
+        ]);
+        setItems(itemsData);
+        setCategories(['全部作品', ...categoriesData.map(c => c.name)]);
+        setDefaultImage(homeContentData.heroImage || '');
+        setDefaultShareTitle(homeContentData.shareTitle || '大连柒子文化发展有限公司');
+        setDefaultShareDescription(homeContentData.shareDescription || '诚信立足 创新致远');
+      } catch (error) {
+        console.error('Failed to load data:', error);
+      }
+    };
+    
+    loadData();
+  }, []);
 
   // Initial deep link detection
   useEffect(() => {
@@ -57,13 +69,13 @@ export function PortfolioView() {
     } else {
       // Restore default share metadata when closing
       setupShareMetadata({
-        title: '大连柒子文化发展有限公司',
-        desc: '诚信立足 创新致远',
+        title: defaultShareTitle,
+        desc: defaultShareDescription,
         link: url.toString(),
         imgUrl: defaultImage
       });
     }
-  }, [selectedItem, defaultImage]);
+  }, [selectedItem, defaultImage, defaultShareTitle, defaultShareDescription]);
 
   const handleShare = async () => {
     if (!selectedItem) return;
@@ -195,8 +207,9 @@ export function PortfolioView() {
         {selectedItem && (
           <div className="flex flex-col h-full relative">
             <div className={`absolute top-0 left-0 w-full h-64 ${selectedItem.bgGlow} blur-[80px] -z-10 opacity-50`}></div>
-            <div className="relative aspect-video shrink-0 bg-black">
-              {selectedItem.videoUrl ? (
+            {/* Check if it's a video or an image with multiple images */}
+            {selectedItem.videoUrl ? (
+              <div className="relative aspect-video shrink-0 bg-black">
                 <video 
                   src={selectedItem.videoUrl} 
                   className="w-full h-full object-cover"
@@ -206,20 +219,88 @@ export function PortfolioView() {
                   playsInline
                   controls
                 />
-              ) : (
-                <>
-                  <img src={selectedItem.img} alt={selectedItem.title} className="w-full h-full object-cover" />
-                  {selectedItem.type === 'video' && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-black/30">
-                      <div className="w-16 h-16 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center border border-white/30">
-                        <Play className="text-white w-8 h-8 ml-1" />
-                      </div>
+                {selectedItem.type === 'video' && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/30 pointer-events-none">
+                    <div className="w-16 h-16 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center border border-white/30">
+                      <Play className="text-white w-8 h-8 ml-1" />
                     </div>
-                  )}
-                </>
-              )}
-              <div className="absolute inset-0 bg-gradient-to-t from-surface-container-low via-surface-container-low/20 to-transparent pointer-events-none"></div>
-            </div>
+                  </div>
+                )}
+                <div className="absolute inset-0 bg-gradient-to-t from-surface-container-low via-surface-container-low/20 to-transparent pointer-events-none"></div>
+              </div>
+            ) : selectedItem.images && selectedItem.images.length > 0 ? (
+              /* Carousel with all images (cover + additional) */
+              <div className="relative aspect-video shrink-0 bg-black overflow-hidden group">
+                <div className="h-full flex transition-transform duration-500" style={{ transform: `translateX(-${(selectedItem as any).currentSlideIndex || 0}00%)` }}>
+                  {/* Cover image first */}
+                  <img 
+                    src={selectedItem.img} 
+                    alt={selectedItem.title} 
+                    className="w-full h-full object-cover flex-shrink-0" 
+                  />
+                  {/* Additional images */}
+                  {selectedItem.images.map((imgUrl, idx) => (
+                    <img 
+                      key={idx}
+                      src={imgUrl} 
+                      alt={`${selectedItem.title} ${idx + 1}`} 
+                      className="w-full h-full object-cover flex-shrink-0" 
+                    />
+                  ))}
+                </div>
+                {/* Navigation arrows */}
+                <button 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const total = 1 + (selectedItem.images?.length || 0);
+                    setSelectedItem({
+                      ...selectedItem,
+                      currentSlideIndex: Math.max(0, ((selectedItem as any).currentSlideIndex || 0) - 1)
+                    });
+                  }}
+                  className="absolute left-4 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/40 backdrop-blur-md border border-white/10 text-white/70 hover:text-white hover:bg-black/60 transition-all opacity-0 group-hover:opacity-100"
+                >
+                  <ChevronLeft className="w-6 h-6" />
+                </button>
+                <button 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const total = 1 + (selectedItem.images?.length || 0);
+                    setSelectedItem({
+                      ...selectedItem,
+                      currentSlideIndex: Math.min(total - 1, ((selectedItem as any).currentSlideIndex || 0) + 1)
+                    });
+                  }}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/40 backdrop-blur-md border border-white/10 text-white/70 hover:text-white hover:bg-black/60 transition-all opacity-0 group-hover:opacity-100"
+                >
+                  <ChevronRight className="w-6 h-6" />
+                </button>
+                {/* Indicators */}
+                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2">
+                  <span className={`w-2 h-2 rounded-full transition-all ${((selectedItem as any).currentSlideIndex || 0) === 0 ? 'bg-white w-4' : 'bg-white/50'}`}></span>
+                  {(selectedItem.images || []).map((_, idx) => (
+                    <span 
+                      key={idx} 
+                      className={`w-2 h-2 rounded-full transition-all ${((selectedItem as any).currentSlideIndex || 0) === idx + 1 ? 'bg-white w-4' : 'bg-white/50'}`}
+                    ></span>
+                  ))}
+                </div>
+                <div className="absolute inset-0 bg-gradient-to-t from-surface-container-low via-surface-container-low/20 to-transparent pointer-events-none"></div>
+              </div>
+            ) : (
+              /* Single image */
+              <div className="relative aspect-video shrink-0 bg-black">
+                <img src={selectedItem.img} alt={selectedItem.title} className="w-full h-full object-cover" />
+                {selectedItem.type === 'video' && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                    <div className="w-16 h-16 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center border border-white/30">
+                      <Play className="text-white w-8 h-8 ml-1" />
+                    </div>
+                  </div>
+                )}
+                <div className="absolute inset-0 bg-gradient-to-t from-surface-container-low via-surface-container-low/20 to-transparent pointer-events-none"></div>
+              </div>
+            )}
             <div className="p-6 flex-1 flex flex-col -mt-8 relative z-10">
               <div className="flex items-center gap-2 mb-4">
                 <span className={`px-2 py-0.5 rounded-sm bg-black/40 border border-white/10 text-[10px] font-label uppercase tracking-wider ${selectedItem.color}`}>

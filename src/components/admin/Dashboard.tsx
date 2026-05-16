@@ -11,14 +11,24 @@ export function Dashboard() {
   });
 
   useEffect(() => {
-    const items = getPortfolioItems();
-    const categories = getCategories();
-    setStats({
-      portfolioCount: items.length,
-      imageCount: items.filter(i => i.type === 'image').length,
-      videoCount: items.filter(i => i.type === 'video').length,
-      categoryCount: categories.length
-    });
+    const loadData = async () => {
+      try {
+        const [items, categories] = await Promise.all([
+          getPortfolioItems(),
+          getCategories()
+        ]);
+        setStats({
+          portfolioCount: items.length,
+          imageCount: items.filter(i => i.type === 'image').length,
+          videoCount: items.filter(i => i.type === 'video').length,
+          categoryCount: categories.length
+        });
+      } catch (error) {
+        console.error('Failed to load dashboard data:', error);
+      }
+    };
+    
+    loadData();
   }, []);
 
   const statCards = [

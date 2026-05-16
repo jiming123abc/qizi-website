@@ -3,63 +3,26 @@ import { Modal } from './Modal';
 import { getTeamMembers, TeamMember } from '../data/store';
 
 export function TeamView() {
-  const [selectedMember, setSelectedMember] = useState<(TeamMember & { fullDesc?: string }) | null>(null);
+  const [selectedMember, setSelectedMember] = useState<(TeamMember) | null>(null);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
 
   useEffect(() => {
-    setTeamMembers(getTeamMembers());
+    const loadTeam = async () => {
+      const members = await getTeamMembers();
+      setTeamMembers(members);
+    };
+    loadTeam();
   }, []);
 
   const getMemberColor = (index: number) => {
-    const colors = ['text-primary', 'text-secondary', 'text-tertiary', 'text-primary-dim'];
+    const colors = ['text-primary', 'text-secondary', 'text-tertiary', 'text-secondary-fixed-dim'];
     return colors[index % colors.length];
   };
 
   const getMemberBgGlow = (index: number) => {
-    const glows = ['bg-primary/20', 'bg-secondary/20', 'bg-tertiary/20', 'bg-primary-dim/20'];
+    const glows = ['bg-primary/20', 'bg-secondary/20', 'bg-tertiary/20', 'bg-secondary/20'];
     return glows[index % glows.length];
   };
-
-  const defaultMembers = [
-    {
-      id: 1,
-      name: 'Aris Vane',
-      role: 'Chief Architect',
-      bio: 'Neural network optimization and ethereal render engine lead.',
-      fullDesc: 'Aris Vane is the visionary behind the Septem Ethereal Engine. With a background in quantum computing and neural aesthetics, Aris bridges the gap between raw data and cinematic beauty. His work focuses on optimizing generative models to run with near-zero latency while maintaining 8K resolution fidelity. He previously led the AI graphics division at a top-tier tech firm before founding Septem.',
-      avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuBI1wLmLAavWwY3sjC6VvvnHv7Z-TOXQQAti5URfUduUmhgIZN5oP6jzt9G7hgjKoUAZ3KM2VnBM8YHS7cLvSVd58U9K27-iH9y_5EZKDmhQDu3BoyoJSZ7pUNDSjzLDHH-7eg_c9Joe-Hzc66htw_tbBcJepN2ohMibJ4SwTaJfQh-iHrL9nBC_6j9P8XE_Q75ucsbOet99h4DQXzbfKvfYQgDWzEImpfhySOQuoMp93xQrGNg_b6D6fU7kHhfuE6DlRV_BVnbkW8',
-      sortOrder: 1
-    },
-    {
-      id: 2,
-      name: 'Kaelen Thorne',
-      role: 'Visual Director',
-      bio: 'Mastermind behind the cinematic aesthetic of Septem Vision.',
-      fullDesc: 'Kaelen Thorne brings over a decade of experience in Hollywood VFX and digital cinematography. At Septem, Kaelen ensures that every AI-generated frame adheres to strict cinematic principles—from lighting and composition to color grading. Kaelen\'s unique approach blends traditional film theory with cutting-edge neural rendering.',
-      avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuC1GdXuj4dFpNkePTtOpw7nSbzX_T-pdq7KAN270cZTwWFiykDjInCUjZopaRQB_14SeKcZqkjfMqeNeGCh5mtIA5WnSl3-Y5ygw4FopihOIv9ONvtU1Ti4Qy7qQ4hiW9yIVnAPwlJCzoKtBhFvXFa3stdrU3aoFBpgYodb2k_VCtEJ044PlzX23gHxVGrdss2-WWVpwDVB-VT4SAw7AsX8KcxHJGTnLRj90AMnCwCxix-lFW9dZv10aidhwnDS-3v3jeha-XmMBSs',
-      sortOrder: 2
-    },
-    {
-      id: 3,
-      name: 'Soren Jinx',
-      role: 'AI Strategist',
-      bio: 'Directing the evolution of generative models for narrative flow.',
-      fullDesc: 'Soren Jinx focuses on the narrative capabilities of AI. By fine-tuning large language models and multimodal systems, Soren creates AI agents capable of generating coherent, emotionally resonant storyboards and scripts. Soren\'s research pushes the boundaries of how machines understand and replicate human storytelling.',
-      avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuBOQG4oEscoDTBKYA2bdCfjet5PJvLzkPYu8eRRrxB_fRamIVilSSHS1ROD-tMQqpxce4b0dlD8jXdSU0xMl4yr38lZOQrtw6sbai5-ilaZ5n_SdGIk2-Hmg6zTL3FurRhz_I15KmIq5EpHTao9HkE1v-tpNjc6NqSLcV7dMsCdQXeTTHdnwuL0JXZsuionTaAOTKfnDsDp8QRAXM7mOyG7iLz4yd27mjMvHUdBsvsfcuETC7vO_2lDG1BdR9p3OsDpElwDb_u_ZUQ',
-      sortOrder: 3
-    },
-    {
-      id: 4,
-      name: 'Elena Ross',
-      role: 'Fluid Dynamics',
-      bio: 'Expert in digital atmospheric effects and particle systems.',
-      fullDesc: 'Elena Ross is the wizard behind the ethereal particles, smoke, and fluid simulations that give Septem\'s visuals their signature look. Leveraging AI to predict fluid behavior, Elena creates hyper-realistic atmospheric effects that would traditionally take days to render, achieving them in real-time.',
-      avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuDOvvhfCyWH2_JgmDHVYpAMLDUM0qtFHntKzaMQTC8rrG_NPLjGlfRNdr3p_apTOnZ1wNRaIO7EHg6tqGtgGpYrxVQBJKUwYYsIDOsIT1IsM9HLrtuagCQeFcCrAYkBCMBmiHEkBS-ymq3SInArlfqQe5ZHgrdknhizEwBsL5yY7N-2de8GgObO4go0DXxRA0aY4FyeSwT9UXbusN7KGSMtu73ZJEPfooopfz-PliXD-T4ue7sMGuUvpKaYV2zC_oF81BGwz4vGeC8',
-      sortOrder: 4
-    }
-  ];
-
-  const displayMembers = teamMembers.length > 0 ? teamMembers : defaultMembers;
 
   return (
     <div className="flex-grow pt-20 pb-32 lg:pb-12 px-6 space-y-16">
@@ -87,10 +50,10 @@ export function TeamView() {
           <span className="font-label text-[10px] text-outline hidden md:block">SELECT TO EXPLORE PROTOCOL</span>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-6">
-          {displayMembers.map((member, index) => (
+          {teamMembers.map((member, index) => (
             <button
               key={member.id}
-              onClick={() => setSelectedMember({ ...member, fullDesc: defaultMembers.find(m => m.id === member.id)?.fullDesc || '' })}
+              onClick={() => setSelectedMember(member)}
               className="w-full text-left group relative bg-surface-container-low rounded-2xl overflow-hidden border border-white/5 flex h-48 transition-all hover:bg-white/5 active:scale-[0.98]"
             >
               <div className="w-2/5 h-full relative overflow-hidden">
@@ -171,13 +134,13 @@ export function TeamView() {
                 <div className="absolute inset-0 bg-gradient-to-t from-surface-container via-surface-container/50 to-transparent" />
               </div>
               <div className="p-8 -mt-16 relative">
-                <p className={`font-label text-[10px] tracking-[0.2em] uppercase ${getMemberColor(displayMembers.findIndex(m => m.id === selectedMember.id) || 0)}`}>
+                <p className={`font-label text-[10px] tracking-[0.2em] uppercase ${getMemberColor(teamMembers.findIndex(m => m.id === selectedMember.id) || 0)}`}>
                   {selectedMember.role}
                 </p>
                 <h3 className="text-3xl font-headline font-bold text-on-surface mt-2">{selectedMember.name}</h3>
                 <div className="w-16 h-[2px] bg-gradient-to-r from-primary to-secondary mt-4 rounded-full"></div>
                 <p className="text-on-surface-variant font-body leading-relaxed mt-6">
-                  {selectedMember.fullDesc || selectedMember.bio}
+                  {(selectedMember as any).fullDesc || selectedMember.bio}
                 </p>
               </div>
             </div>

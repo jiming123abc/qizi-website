@@ -5,36 +5,57 @@ import { isWeChat, copyToClipboard, setupShareMetadata } from '../lib/shareUtils
 import { ShareHint } from './WeChatShareHint';
 import { getFeaturedWorks, getPortfolioItems, getHomeContent, getCategoriesWithDetails, PortfolioItem, HomeContent, CategoryWithDetails } from '../data/store';
 
+const heroSlides = [
+  {
+    id: 1,
+    img: '/images/hero-video.png',
+    label: 'Neural Stream',
+    title: 'Ethereal Segment 01'
+  },
+  {
+    id: 2,
+    img: '/images/ai-digital-human.png',
+    label: 'Digital Human',
+    title: 'Avatar Segment 02'
+  },
+  {
+    id: 3,
+    img: '/images/ai-film-production.png',
+    label: 'Film Production',
+    title: 'Cinematic Segment 03'
+  }
+];
+
 const coreBusiness = [
   {
     id: 'cb1',
     title: 'AI 数字人定制',
     shortDesc: '基于最前沿的神经网络渲染技术，打造极致逼真的数字孪生与虚拟偶像。支持毫秒级低延迟实时交互。',
     fullDesc: '基于最前沿的神经网络渲染技术，打造极致逼真的数字孪生与虚拟偶像。支持毫秒级低延迟实时交互，为品牌代言与元宇宙直播提供全链路解决方案。',
-    img: 'https://lh3.googleusercontent.com/aida-public/AB6AXuAp92O6UL9Vz2Y49V1pDeEaHSG60rc7Qo0WxFOSNdnZ73WECUQxvok_Ljw0_eu88WCkDV-V1ps4GTjXG3logkuhu09jLkfHqQYGHg_vJ-SMzQadM4e6BMeBUvEgw3PaYreuk82SU0Pnt_2khipWe-DYxJSnoAW4XnjO_zJ1nBef9ytJKr67OXcOAbe8AKYp-a0zRYLKCa7MU-6dPBgSKa0CJYiegBYWzWBjzaP3PuzL-jhC1Qx9GmekBCcE_EuCfPOtX8FQ2V6DND8',
-    category: '核心业务',
+    img: '/images/ai-digital-human.png',
+    category: '核心服务',
     tag: '数字人',
-    color: 'text-primary',
-    bgGlow: 'bg-primary/20'
+    color: 'text-secondary',
+    bgGlow: 'bg-secondary/20'
   },
   {
     id: 'cb2',
     title: '电影级 AI 制作',
     shortDesc: '重塑视频工业流程。利用 AI 赋能预可视化、特效合成与智能调色，将传统昂贵的影视工业水准带入全行业。',
     fullDesc: '重塑视频工业流程。利用 AI 赋能预可视化、特效合成与智能调色，将传统昂贵的影视工业水准带入全行业，实现高效、震撼的视觉叙事。',
-    img: 'https://lh3.googleusercontent.com/aida-public/AB6AXuC2oewJ15NnSn9V-GoIKkwxoY1AqBw8HA3aIRrU1pYtGc8y3NfJ8-M-8d_91Wg61pvV2YhhYcKqm8PixFHN_mu4njCl-PlSTzF5MHmTZ7yJ9-sl0HWcg-r81YTI_k6Oe9Q5R1jnOSu2-O7qRmCPFDeBqaf1AShYZgafO4NECgueKISBQ-Ame6ElhnbLFXZFwZ1hovklirx2Tu_DNHMivQzGQ1O4yB9HW3fEHychiTl2rxn7jCE4RpLCoiiOVV4FllQ55626gruZFaM',
-    category: '核心业务',
+    img: '/images/ai-film-production.png',
+    category: '核心服务',
     tag: '影视制作',
-    color: 'text-secondary',
-    bgGlow: 'bg-secondary/20'
+    color: 'text-primary',
+    bgGlow: 'bg-primary/20'
   },
   {
     id: 'cb3',
     title: '社交平台短视频 AI',
     shortDesc: '深度理解社交媒体流量密码。智能脚本生成、自动剪辑与爆款元素植入，助您快速构建高粘性生态。',
     fullDesc: '深度理解社交媒体流量密码。智能脚本生成、自动剪辑与爆款元素植入，助您在碎片化时代快速构建高粘性的短视频生态。',
-    img: 'https://lh3.googleusercontent.com/aida-public/AB6AXuAQW5T_kIPPyvA0MArzCohp-Lvna6zFt2XVq_gvZQ9jAyCvDOHGl99kNivu9epZvRpRWEXnN7TDAcQvv0NMC9QlFNvKpjyjJVILsEgBhiLoltlUxxpxSIXTNl6mpd0z5J2Xww-y-tk1nAtx3PAAR9WZ82tRv3Pv4mTUCy56Oj-EbcPF4Iy7CNrZaDQJBOBZrrJ4agMu0RAI16RW8axFEwxgMZuI8t6czAeuzsQYFKbLW0JBNus9PBl2Lvq3KzxuHRvBFWhA-q9VsOo',
-    category: '核心业务',
+    img: '/images/ai-short-video.png',
+    category: '核心服务',
     tag: '短视频',
     color: 'text-tertiary',
     bgGlow: 'bg-tertiary/20'
@@ -44,8 +65,8 @@ const coreBusiness = [
     title: '神经网络技术栈',
     shortDesc: '自主研发的底层引擎。涵盖 GANs, Diffusion Models 与 Transformer 架构的深度优化。',
     fullDesc: '自主研发的底层引擎。涵盖 GANs, Diffusion Models 与 Transformer 架构的深度优化，为各类复杂商业场景提供最稳健的底层算力与算法支持。',
-    img: 'https://lh3.googleusercontent.com/aida-public/AB6AXuD9sPNFE9R6ql6lY5e9KZaO0PSDxjlAiPj22W0-bUUEdp1ZXEe1W-nUX_AXm14HSH01mDUjtaM2h3V8cGxjuy1v7NtABWUVxbcM-TvHE3RJOjFpLdBH3KeCPSF-sNZTVo-p6F2aNpcO7hVsASMZBr6exfJgyMZ2bKSzJZMQzBNXoPUJ3pY5XntB39SEtQX_CHKDEWJjQvqOLe-Ph24m71ztA8xOpu0a_pZvV4aknL7du7cSZ9V2UWqp1N4uhlmS86JZxPVYdn-ijE4',
-    category: '核心业务',
+    img: '/images/ai-tech-stack.png',
+    category: '核心服务',
     tag: '技术栈',
     color: 'text-secondary-fixed-dim',
     bgGlow: 'bg-secondary/20'
@@ -60,9 +81,8 @@ const featuredWorks = [
     tag: '实时渲染',
     shortDesc: '打造毫秒级延迟的虚拟代言人，重塑直播与交互体验。',
     fullDesc: '通过最先进的神经渲染技术，我们为品牌定制了专属的数字孪生。该系统支持实时面部捕捉与动作过滤，确保在任何直播环境下都能保持稳定、自然的视觉还原。目前已成功应用于多个头部品牌的元宇宙营销方案。',
-    img: 'https://images.unsplash.com/photo-1620641788421-7a1c342ea42e?q=80&w=2074&auto=format&fit=crop',
-    videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-young-woman-in-a-futuristic-setting-34533-large.mp4',
-    type: 'video',
+    img: '/images/neon-avatar.png',
+    type: 'image',
     color: 'text-secondary',
     bgGlow: 'bg-secondary/20'
   },
@@ -73,7 +93,7 @@ const featuredWorks = [
     tag: '内容爆发',
     shortDesc: '智能捕捉社媒热点，自动化生成高点击率的爆款短视频。',
     fullDesc: '针对 TikTok、快手、抖音等平台优化的一站式内容引擎。系统会自动分析当日热搜词条，并基于此生成匹配的视觉素材、脚本与配音。在为期一个月的测试中，该项目助力客户账号实现了 300% 的粉丝增长率。',
-    img: 'https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?q=80&w=1974&auto=format&fit=crop',
+    img: '/images/traffic-secret.png',
     type: 'image',
     color: 'text-tertiary',
     bgGlow: 'bg-tertiary/20'
@@ -86,35 +106,74 @@ export function HomeView() {
   const [featuredItems, setFeaturedItems] = useState<(PortfolioItem & { featuredId: string })[]>([]);
   const [homeContent, setHomeContent] = useState<HomeContent>({
     heroTitle: '',
+    heroGradientTitle: '',
     heroSubtitle: '',
-    heroImage: '',
-    aboutTitle: '',
-    aboutContent: ''
+    heroSlides: []
   });
   const [categories, setCategories] = useState<CategoryWithDetails[]>([]);
+  const [currentSlide, setCurrentSlide] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const heroIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    const portfolioItems = getPortfolioItems();
-    const featuredWorks = getFeaturedWorks();
-    const items = featuredWorks
-      .map(fw => {
-        const item = portfolioItems.find(pi => pi.id === fw.portfolioId);
-        if (item) {
-          return { ...item, featuredId: fw.id };
-        }
-        return null;
-      })
-      .filter((item): item is PortfolioItem & { featuredId: string } => item !== null)
-      .sort((a, b) => {
-        const aOrder = getFeaturedWorks().find(fw => fw.id === a.featuredId)?.sortOrder || 0;
-        const bOrder = getFeaturedWorks().find(fw => fw.id === b.featuredId)?.sortOrder || 0;
-        return aOrder - bOrder;
-      });
-    setFeaturedItems(items);
-    setHomeContent(getHomeContent());
-    setCategories(getCategoriesWithDetails());
+    const loadData = async () => {
+      try {
+        const [portfolioItems, featuredWorks, homeContent, categories] = await Promise.all([
+          getPortfolioItems(),
+          getFeaturedWorks(),
+          getHomeContent(),
+          getCategoriesWithDetails()
+        ]);
+        
+        const items = featuredWorks
+          .map(fw => {
+            const item = portfolioItems.find(pi => pi.id === fw.portfolioId);
+            if (item) {
+              return { ...item, featuredId: fw.id };
+            }
+            return null;
+          })
+          .filter((item): item is PortfolioItem & { featuredId: string } => item !== null)
+          .sort((a, b) => {
+            const aOrder = featuredWorks.find(fw => fw.id === a.featuredId)?.sortOrder || 0;
+            const bOrder = featuredWorks.find(fw => fw.id === b.featuredId)?.sortOrder || 0;
+            return aOrder - bOrder;
+          });
+        setFeaturedItems(items);
+        setHomeContent(homeContent);
+        setCategories(categories);
+      } catch (error) {
+        console.error('Failed to load data:', error);
+      }
+    };
+    
+    loadData();
   }, []);
+
+  // Hero carousel auto-play
+  useEffect(() => {
+    if (homeContent.heroSlides && homeContent.heroSlides.length > 0) {
+      heroIntervalRef.current = setInterval(() => {
+        setCurrentSlide((prev) => (prev + 1) % (homeContent.heroSlides?.length || 1));
+      }, 5000);
+    }
+    
+    return () => {
+      if (heroIntervalRef.current) {
+        clearInterval(heroIntervalRef.current);
+      }
+    };
+  }, [homeContent.heroSlides]);
+
+  const nextHeroSlide = () => {
+    const slideCount = homeContent.heroSlides?.length || 1;
+    setCurrentSlide((prev) => (prev + 1) % slideCount);
+  };
+
+  const prevHeroSlide = () => {
+    const slideCount = homeContent.heroSlides?.length || 1;
+    setCurrentSlide((prev) => (prev - 1 + slideCount) % slideCount);
+  };
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -151,10 +210,10 @@ export function HomeView() {
     } else {
       // Restore default share metadata when closing
       setupShareMetadata({
-        title: '大连柒子文化发展有限公司',
-        desc: '诚信立足 创新致远',
+        title: homeContent.shareTitle || '大连柒子文化发展有限公司',
+        desc: homeContent.shareDescription || '诚信立足 创新致远',
         link: url.toString(),
-        imgUrl: homeContent.hero?.cover || ''
+        imgUrl: homeContent.heroImage || '/images/hero-home.png'
       });
     }
   }, [selectedItem, homeContent]);
@@ -192,39 +251,93 @@ export function HomeView() {
         <div className="absolute top-0 right-0 w-96 h-96 bg-primary/10 blur-[120px] -z-10"></div>
         
         <div className="flex-1 space-y-6">
-          <h2 
-            className="font-headline text-4xl sm:text-5xl lg:text-7xl font-bold leading-[1.1] tracking-tight text-on-surface"
-            dangerouslySetInnerHTML={{ __html: homeContent.heroTitle || '开启未来的<br /><span className="text-gradient">视界 Matrix</span>' }}
-          />
-          <p className="font-body text-on-surface-variant text-lg lg:text-xl leading-relaxed max-w-xl">
-            {homeContent.heroSubtitle || '通过 AIGC 重新定义数字影像。我们将人类的情感与神经计算相结合，打造跨越维度的奇迹。'}
-          </p>
-        </div>
-
-        {/* Video Placeholder Card */}
-        <div className="mt-12 lg:mt-0 flex-1 w-full aspect-video rounded-3xl overflow-hidden relative surface-container shadow-2xl group border border-white/5">
-          <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent z-10"></div>
-          <img
-            className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-105"
-            alt="Futuristic cinematic video frame"
-            src="https://lh3.googleusercontent.com/aida-public/AB6AXuBVnsilofkLdu_UD0gMLpFa3FNesRCTduuMzvnsGe_-j8w0_DokWrqAjjcXqBefYFRO7iOHZGs8glunqVrLuxr28k0_pGIDT54wDOoVF0bhUNVukujHNiqIJlbtqhTm-DqbVvqONvOhaKqsEscnFkcLWfH_SMHF-59Bh6jBqGaczV0boqSCmytchNdYPthBVQ53rS_86d8YTvrnxY3bDsDUYJX7OI3eXu9nv8niQv3H8hGyz_0VTKpABpHUHv7ZDuQO-B302O_0K44"
-          />
-          <div className="absolute bottom-6 left-6 z-20 flex items-center gap-4">
-            <div className="w-12 h-12 rounded-full bg-secondary/20 backdrop-blur-md flex items-center justify-center border border-secondary/30 shadow-[0_0_20px_rgba(83,237,252,0.2)]">
-              <PlayCircle className="text-secondary w-6 h-6" />
-            </div>
-            <div>
-              <span className="font-label text-[10px] tracking-[0.2em] uppercase text-secondary/60 block mb-0.5">Neural Stream</span>
-              <span className="font-headline font-bold text-lg text-secondary">Ethereal Segment 01</span>
-            </div>
+          <h2 className="text-4xl md:text-6xl font-headline font-black tracking-tighter leading-[1.1]">
+            {homeContent.heroTitle || '开启未来的'}<br />
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary via-secondary to-tertiary">
+              {homeContent.heroGradientTitle || '视界 Matrix'}
+            </span>
+          </h2>
+          <div className="border-l-4 border-primary/30 pl-6 py-2">
+            <p className="text-on-surface-variant font-body text-base md:text-lg leading-relaxed italic max-w-xl">
+              {homeContent.heroSubtitle || '通过 AIGC 重新定义数字影像。我们将人类的情感与神经计算相结合，打造跨越维度的奇迹。'}
+            </p>
           </div>
         </div>
+
+        {/* Hero Carousel */}
+        {(homeContent.heroSlides && homeContent.heroSlides.length > 0) && (
+          <div className="mt-12 lg:mt-0 flex-1 w-full aspect-video rounded-3xl overflow-hidden relative surface-container shadow-2xl border border-white/5 group">
+            {/* Carousel slides */}
+            <div className="relative w-full h-full">
+              {homeContent.heroSlides.map((slide, index) => (
+                <div
+                  key={slide.id}
+                  className={`absolute inset-0 transition-opacity duration-1000 ${
+                    index === currentSlide ? 'opacity-100' : 'opacity-0'
+                  }`}
+                >
+                  <img
+                    className="w-full h-full object-cover"
+                    alt={`Hero slide ${index + 1}`}
+                    src={slide.img}
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent z-10"></div>
+                  <div className="absolute bottom-6 left-6 z-20 flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-full bg-secondary/20 backdrop-blur-md flex items-center justify-center border border-secondary/30 shadow-[0_0_20px_rgba(83,237,252,0.2)]">
+                      <PlayCircle className="text-secondary w-6 h-6" />
+                    </div>
+                    <div>
+                      {slide.label && (
+                        <span className="font-label text-[10px] tracking-[0.2em] uppercase text-secondary/60 block mb-0.5">{slide.label}</span>
+                      )}
+                      {slide.title && (
+                        <span className="font-headline font-bold text-lg text-secondary">{slide.title}</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            
+            {/* Navigation buttons */}
+            <button
+              onClick={prevHeroSlide}
+              className="absolute left-4 top-1/2 -translate-y-1/2 z-30 p-2 rounded-full bg-black/40 backdrop-blur-md border border-white/10 text-white/80 hover:text-white hover:bg-black/60 transition-all opacity-0 group-hover:opacity-100"
+            >
+              <ChevronLeft className="w-6 h-6" />
+            </button>
+            <button
+              onClick={nextHeroSlide}
+              className="absolute right-4 top-1/2 -translate-y-1/2 z-30 p-2 rounded-full bg-black/40 backdrop-blur-md border border-white/10 text-white/80 hover:text-white hover:bg-black/60 transition-all opacity-0 group-hover:opacity-100"
+            >
+              <ChevronRight className="w-6 h-6" />
+            </button>
+            
+            {/* Indicators */}
+            <div className="absolute bottom-4 right-4 z-20 flex gap-2">
+              {homeContent.heroSlides.map((_, index) => (
+                <button
+                  key={index}
+                  onClick={() => setCurrentSlide(index)}
+                  className={`w-2 h-2 rounded-full transition-all ${
+                    index === currentSlide 
+                      ? 'bg-secondary w-6 rounded-full' 
+                      : 'bg-white/30 hover:bg-white/50'
+                  }`}
+                />
+              ))}
+            </div>
+          </div>
+        )}
       </section>
 
       {/* Core Business Areas */}
       <section className="px-6 py-12 relative group/carousel">
         <div className="flex items-end justify-between mb-8">
-          <h3 className="font-headline text-2xl font-bold text-on-surface tracking-tight">核心业务领域</h3>
+          <div>
+            <h3 className="font-headline text-2xl font-bold text-on-surface tracking-tight">核心业务矩阵 Matrix</h3>
+            <p className="text-on-surface-variant font-label text-[10px] tracking-widest mt-1 uppercase opacity-50">Service Core Functional Matrix</p>
+          </div>
           <span className="font-label text-[10px] text-outline">SWIPE FOR MORE</span>
         </div>
         
@@ -366,49 +479,82 @@ export function HomeView() {
       <Modal 
         isOpen={!!selectedItem} 
         onClose={() => setSelectedItem(null)} 
-        onShare={(!selectedItem || 'name' in selectedItem) ? undefined : handleShare}
       >
         {selectedItem && (
           <div className="flex flex-col h-full relative">
             <div className={`absolute top-0 left-0 w-full h-64 ${selectedItem.bgGlow || 'bg-primary/20'} blur-[80px] -z-10 opacity-50`}></div>
-            <div className="relative aspect-video shrink-0 bg-black">
-              {('videoUrl' in selectedItem && selectedItem.videoUrl) ? (
-                <video 
-                  src={selectedItem.videoUrl as string} 
-                  className="w-full h-full object-cover"
-                  autoPlay
-                  loop
-                  muted
-                  playsInline
-                  controls
-                />
-              ) : (
-                <>
+            {/* Check if it's a portfolio item with multiple images */}
+            {!('coverImage' in selectedItem) && ('images' in selectedItem) && selectedItem.images && selectedItem.images.length > 0 ? (
+              <div className="relative aspect-video shrink-0 bg-black overflow-hidden group">
+                {/* Carousel with all images (cover + additional) */}
+                <div className="h-full flex transition-transform duration-500" style={{ transform: `translateX(-${(selectedItem as any).currentSlideIndex || 0}00%)` }}>
+                  {/* Cover image first */}
                   <img 
-                    src={('coverImage' in selectedItem ? selectedItem.coverImage : selectedItem.img) || 'https://neeko-copilot.bytedance.net/api/text_to_image?prompt=professional%20digital%20art%20studio%20logo&image_size=square'} 
-                    alt={('name' in selectedItem ? selectedItem.name : selectedItem.title)} 
-                    className="w-full h-full object-cover" 
+                    src={selectedItem.img || '/images/neon-avatar.png'} 
+                    alt={selectedItem.title} 
+                    className="w-full h-full object-cover flex-shrink-0" 
                   />
-                  {('type' in selectedItem && selectedItem.type === 'video') && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-black/30">
-                      <div className="w-16 h-16 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center border border-white/30">
-                        <Play className="text-white w-8 h-8 ml-1" />
-                      </div>
-                    </div>
-                  )}
-                </>
-              )}
-              <div className="absolute inset-0 bg-gradient-to-t from-surface-container-low via-surface-container-low/20 to-transparent pointer-events-none"></div>
-            </div>
-            <div className="p-6 flex-1 flex flex-col -mt-8 relative z-10">
-              <div className="flex items-center gap-2 mb-4">
-                <span className={`px-2 py-0.5 rounded-sm bg-black/40 border border-white/10 text-[10px] font-label uppercase tracking-wider ${selectedItem.color || 'text-primary'}`}>
-                  {('category' in selectedItem ? selectedItem.category : '核心业务')}
-                </span>
-                <span className="px-2 py-0.5 rounded-sm bg-black/40 border border-white/10 text-white/70 text-[10px] font-label uppercase tracking-wider">
-                  {selectedItem.tag}
-                </span>
+                  {/* Additional images */}
+                  {(selectedItem as any).images.map((imgUrl: string, idx: number) => (
+                    <img 
+                      key={idx}
+                      src={imgUrl} 
+                      alt={`${selectedItem.title} ${idx + 1}`} 
+                      className="w-full h-full object-cover flex-shrink-0" 
+                    />
+                  ))}
+                </div>
+                {/* Navigation arrows */}
+                <button 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const total = 1 + ((selectedItem as any).images.length || 0);
+                    setSelectedItem({
+                      ...selectedItem,
+                      currentSlideIndex: Math.max(0, ((selectedItem as any).currentSlideIndex || 0) - 1)
+                    });
+                  }}
+                  className="absolute left-4 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/40 backdrop-blur-md border border-white/10 text-white/70 hover:text-white hover:bg-black/60 transition-all opacity-0 group-hover:opacity-100"
+                >
+                  <ChevronLeft className="w-6 h-6" />
+                </button>
+                <button 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const total = 1 + ((selectedItem as any).images.length || 0);
+                    setSelectedItem({
+                      ...selectedItem,
+                      currentSlideIndex: Math.min(total - 1, ((selectedItem as any).currentSlideIndex || 0) + 1)
+                    });
+                  }}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/40 backdrop-blur-md border border-white/10 text-white/70 hover:text-white hover:bg-black/60 transition-all opacity-0 group-hover:opacity-100"
+                >
+                  <ChevronRight className="w-6 h-6" />
+                </button>
+                {/* Indicators */}
+                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2">
+                  <span className={`w-2 h-2 rounded-full transition-all ${((selectedItem as any).currentSlideIndex || 0) === 0 ? 'bg-white w-4' : 'bg-white/50'}`}></span>
+                  {((selectedItem as any).images || []).map((_: any, idx: number) => (
+                    <span 
+                      key={idx} 
+                      className={`w-2 h-2 rounded-full transition-all ${((selectedItem as any).currentSlideIndex || 0) === idx + 1 ? 'bg-white w-4' : 'bg-white/50'}`}
+                    ></span>
+                  ))}
+                </div>
+                <div className="absolute inset-0 bg-gradient-to-t from-surface-container-low via-surface-container-low/20 to-transparent pointer-events-none"></div>
               </div>
+            ) : (
+              /* Single image for business categories or portfolio without additional images */
+              <div className="relative aspect-video shrink-0 bg-black">
+                <img 
+                  src={('coverImage' in selectedItem ? selectedItem.coverImage : selectedItem.img) || '/images/neon-avatar.png'} 
+                  alt={('name' in selectedItem ? selectedItem.name : selectedItem.title)} 
+                  className="w-full h-full object-cover" 
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-surface-container-low via-surface-container-low/20 to-transparent pointer-events-none"></div>
+              </div>
+            )}
+            <div className="p-6 flex-1 flex flex-col -mt-8 relative z-10">
               <h3 className="text-2xl font-headline font-bold text-on-surface mb-6">{('name' in selectedItem ? selectedItem.name : selectedItem.title)}</h3>
               <div className="w-12 h-[1px] bg-white/20 mb-6"></div>
               <p className="text-on-surface-variant leading-relaxed font-body text-sm">

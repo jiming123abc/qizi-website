@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Plus, Edit2, Trash2, X, Upload, Image, Link, FileImage, Check, Loader2, AlertCircle, GripVertical, ChevronUp, ChevronDown } from 'lucide-react';
 import { getTeamMembers, addTeamMember, updateTeamMember, deleteTeamMember, updateTeamMembersSortOrder, TeamMember } from '../../data/store';
-import { uploadImageToOSS } from '../../lib/ossUtils';
+import { uploadImageToOSS, UploadError } from '../../lib/ossUtils';
 
 type ViewMode = 'list' | 'create' | 'edit';
 
@@ -18,15 +18,21 @@ export function TeamAdmin() {
     name: '',
     role: '',
     avatar: '',
-    bio: ''
+    bio: '',
+    fullDesc: ''
   });
 
   useEffect(() => {
     refreshMembers();
   }, []);
 
-  const refreshMembers = () => {
-    setMembers(getTeamMembers());
+  const refreshMembers = async () => {
+    try {
+      const teamMembers = await getTeamMembers();
+      setMembers(teamMembers);
+    } catch (error) {
+      console.error('Failed to refresh team members:', error);
+    }
   };
 
   const handleCreate = () => {
@@ -35,7 +41,8 @@ export function TeamAdmin() {
       name: '',
       role: '',
       avatar: '',
-      bio: ''
+      bio: '',
+      fullDesc: ''
     });
     setViewMode('create');
   };
@@ -47,7 +54,8 @@ export function TeamAdmin() {
       name: member.name,
       role: member.role,
       avatar: member.avatar,
-      bio: member.bio
+      bio: member.bio,
+      fullDesc: (member as any).fullDesc || ''
     });
     setViewMode('edit');
   };
@@ -59,13 +67,23 @@ export function TeamAdmin() {
     }
   };
 
-  const handleAvatarUpload = async (file: File) => {
+  const handleAvatarUpload = async (file: File, forceLocal: boolean = false) => {
     setIsLoading(true);
     try {
-      const url = await uploadImageToOSS(file);
+      const url = await uploadImageToOSS(file, forceLocal);
       setFormData(prev => ({ ...prev, avatar: url }));
     } catch (error) {
-      alert((error as Error).message);
+      const uploadError = error as UploadError;
+      if (uploadError.ossError) {
+        const useLocal = confirm(
+          `${uploadError.message}\n\n是否使用本地存储？`
+        );
+        if (useLocal) {
+          await handleAvatarUpload(file, true);
+        }
+      } else {
+        alert(uploadError.message);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -78,7 +96,7 @@ export function TeamAdmin() {
     }
 
     if (viewMode === 'create') {
-      addTeamMember(formData);
+      addTeamMember({ ...formData, sortOrder: members.length + 1 });
     } else if (viewMode === 'edit' && editingMember) {
       updateTeamMember({ ...formData, id: editingMember.id, sortOrder: editingMember.sortOrder });
     }
@@ -285,6 +303,17 @@ export function TeamAdmin() {
               />
             </div>
 
+            <div>
+              <label className="block text-sm font-label text-on-surface mb-2">详细介绍</label>
+              <textarea
+                value={formData.fullDesc}
+                onChange={(e) => setFormData(prev => ({ ...prev, fullDesc: e.target.value }))}
+                rows={5}
+                className="w-full px-4 py-3 rounded-xl bg-surface-container-low border border-white/10 text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none focus:border-primary/50 transition-colors resize-none"
+                placeholder="详细介绍..."
+              />
+            </div>
+
             <div className="flex gap-4 pt-4">
               <button
                 onClick={handleCancel}
@@ -375,7 +404,7 @@ export function TeamAdmin() {
                   </span>
 
                   <img
-                    src={member.avatar || 'https://via.placeholder.com/48'}
+                    src={member.avatar || '/images/neon-avatar.png'}
                     alt={member.name}
                     className="w-12 h-12 rounded-full object-cover"
                   />

@@ -6,7 +6,30 @@ const path = require('path');
 const crypto = require('crypto');
 const sharp = require('sharp');
 const ffmpeg = require('fluent-ffmpeg');
+const fs = require('fs');
 require('dotenv').config({ path: path.join(__dirname, '../.env') });
+const db = require('./database');
+
+// 确保本地存储目录存在
+const uploadDir = path.join(__dirname, '../public/uploads');
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+if (!fs.existsSync(path.join(uploadDir, 'images'))) {
+  fs.mkdirSync(path.join(uploadDir, 'images'));
+}
+if (!fs.existsSync(path.join(uploadDir, 'videos'))) {
+  fs.mkdirSync(path.join(uploadDir, 'videos'));
+}
+
+// 检查 OSS 是否配置
+const isOSSConfigured = 
+  process.env.REACT_APP_OSS_ACCESS_KEY_ID && 
+  process.env.REACT_APP_OSS_ACCESS_KEY_ID !== '你的OSS AccessKey ID' &&
+  process.env.REACT_APP_OSS_ACCESS_KEY_SECRET && 
+  process.env.REACT_APP_OSS_ACCESS_KEY_SECRET !== '你的OSS AccessKey Secret' &&
+  process.env.REACT_APP_OSS_BUCKET && 
+  process.env.REACT_APP_OSS_BUCKET !== '你的Bucket名称';
 
 // 配置ffmpeg路径（Windows环境可能需要）
 const ffmpegPath = require('ffmpeg-static');
@@ -24,6 +47,9 @@ const port = process.env.PORT || 5000;
 
 app.use(cors());
 app.use(express.json());
+
+app.use('/images', express.static(path.join(__dirname, '../public/images')));
+app.use('/uploads', express.static(path.join(__dirname, '../public/uploads')));
 
 const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
@@ -244,17 +270,46 @@ app.post('/api/upload/image', upload.single('file'), async (req, res) => {
 
     const timestamp = Date.now();
     const extension = req.file.originalname.split('.').pop();
-    const fileName = `images/${timestamp}-${Math.random().toString(36).substr(2, 9)}.${extension}`;
+    const randomStr = Math.random().toString(36).substr(2, 9);
+    const fileName = `${timestamp}-${randomStr}.${extension}`;
+    const filePath = path.join(uploadDir, 'images', fileName);
 
-    const result = await ossClient.put(fileName, fileBuffer);
+    let fileUrl = '';
+    
+    // 检查是否强制使用本地存储（用于 OSS 失败后用户确认的情况）
+    const forceLocalStorage = req.query.forceLocal === 'true';
+    
+    if (isOSSConfigured && !forceLocalStorage) {
+      // 使用 OSS 上传
+      try {
+        const ossFileName = `images/${fileName}`;
+        const result = await ossClient.put(ossFileName, fileBuffer);
+        fileUrl = result.url;
+        console.log('使用 OSS 上传成功');
+      } catch (ossError) {
+        console.warn('OSS 上传失败:', ossError.message);
+        // 返回 OSS 失败错误，让前端询问用户是否使用本地存储
+        return res.status(500).json({ 
+          error: 'OSS 上传失败', 
+          ossError: true,
+          message: '阿里云 OSS 上传失败，是否要上传到本地存储？'
+        });
+      }
+    } else {
+      // 使用本地存储
+      fs.writeFileSync(filePath, fileBuffer);
+      fileUrl = `/uploads/images/${fileName}`;
+      console.log('使用本地存储');
+    }
+
     res.json({ 
-      url: result.url,
+      url: fileUrl,
       compressed: compressed,
       originalSizeKB: parseFloat(originalSizeKB),
       compressedSizeKB: parseFloat(compressedSizeKB)
     });
   } catch (error) {
-    console.error('OSS上传失败:', error);
+    console.error('上传失败:', error);
     res.status(500).json({ error: '上传失败: ' + error.message });
   }
 });
@@ -367,30 +422,58 @@ app.post('/api/upload/video', upload.single('file'), async (req, res) => {
       });
     }
 
-    // 上传到阿里云OSS
+    // 保存文件
     uploadProgressStore.set(uploadId, {
       stage: 'uploading',
       compressProgress: compressed ? 100 : 0,
       ossProgress: 0,
-      message: '正在上传到阿里云OSS... 0%'
+      message: '正在保存文件... 0%'
     });
 
     const timestamp = Date.now();
     const extension = req.file.originalname.split('.').pop();
-    const fileName = `videos/${timestamp}-${Math.random().toString(36).substr(2, 9)}.${extension}`;
+    const randomStr = Math.random().toString(36).substr(2, 9);
+    const fileName = `${timestamp}-${randomStr}.${extension}`;
+    const filePath = path.join(uploadDir, 'videos', fileName);
 
-    // 使用流式上传获取进度
-    const result = await ossClient.put(fileName, fileBuffer, {
-      progress: (percentage) => {
-        const percent = Math.round(percentage * 100);
-        uploadProgressStore.set(uploadId, {
-          stage: 'uploading',
-          compressProgress: compressed ? 100 : 0,
-          ossProgress: percent,
-          message: `正在上传到阿里云OSS... ${percent}%`
+    let fileUrl = '';
+    
+    // 检查是否强制使用本地存储（用于 OSS 失败后用户确认的情况）
+    const forceLocalStorage = req.query.forceLocal === 'true';
+    
+    if (isOSSConfigured && !forceLocalStorage) {
+      // 使用 OSS 上传
+      try {
+        const ossFileName = `videos/${fileName}`;
+        const result = await ossClient.put(ossFileName, fileBuffer, {
+          progress: (percentage) => {
+            const percent = Math.round(percentage * 100);
+            uploadProgressStore.set(uploadId, {
+              stage: 'uploading',
+              compressProgress: compressed ? 100 : 0,
+              ossProgress: percent,
+              message: `正在上传到阿里云OSS... ${percent}%`
+            });
+          }
+        });
+        fileUrl = result.url;
+        console.log('使用 OSS 上传视频成功');
+      } catch (ossError) {
+        console.warn('OSS 上传失败:', ossError.message);
+        uploadProgressStore.delete(uploadId);
+        // 返回 OSS 失败错误，让前端询问用户是否使用本地存储
+        return res.status(500).json({ 
+          error: 'OSS 上传失败', 
+          ossError: true,
+          message: '阿里云 OSS 上传失败，是否要上传到本地存储？'
         });
       }
-    });
+    } else {
+      // 使用本地存储
+      fs.writeFileSync(filePath, fileBuffer);
+      fileUrl = `/uploads/videos/${fileName}`;
+      console.log('使用本地存储视频');
+    }
     
     const endTime = Date.now();
     const processingTime = Math.round((endTime - startTime) / 1000);
@@ -410,7 +493,7 @@ app.post('/api/upload/video', upload.single('file'), async (req, res) => {
     }, 30000);
 
     res.json({ 
-      url: result.url,
+      url: fileUrl,
       compressed: compressed,
       originalBitrate: originalBitrate,
       targetBitrate: compressed ? targetBitrate : null,
@@ -420,7 +503,7 @@ app.post('/api/upload/video', upload.single('file'), async (req, res) => {
     });
   } catch (error) {
     uploadProgressStore.delete(uploadId);
-    console.error('OSS上传失败:', error);
+    console.error('上传失败:', error);
     res.status(500).json({ error: '上传失败: ' + error.message });
   }
 });
@@ -433,6 +516,213 @@ app.get('/api/upload/progress/:uploadId', (req, res) => {
   res.json({
     progress: progress || { compressProgress: 0, uploadProgress: 0 }
   });
+});
+
+app.get('/api/portfolio-items', async (req, res) => {
+  try {
+    const items = await db.portfolioItems.getAll();
+    res.json(items);
+  } catch (error) {
+    console.error('Get portfolio items error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/portfolio-items', async (req, res) => {
+  try {
+    const items = await db.portfolioItems.getAll();
+    const maxSortOrder = Math.max(...items.map(i => i.sortOrder || 0), 0);
+    const item = { ...req.body, sortOrder: maxSortOrder + 1 };
+    const newItem = await db.portfolioItems.create(item);
+    res.json(newItem);
+  } catch (error) {
+    console.error('Create portfolio item error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/portfolio-items/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const updatedItem = await db.portfolioItems.update(id, req.body);
+    res.json(updatedItem);
+  } catch (error) {
+    console.error('Update portfolio item error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/portfolio-items/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    await db.portfolioItems.delete(id);
+    res.status(204).end();
+  } catch (error) {
+    console.error('Delete portfolio item error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/categories', async (req, res) => {
+  try {
+    const categories = await db.categories.getAll();
+    res.json(categories);
+  } catch (error) {
+    console.error('Get categories error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/categories-details', async (req, res) => {
+  try {
+    const categories = await db.categoriesDetails.getAll();
+    res.json(categories);
+  } catch (error) {
+    console.error('Get categories details error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/categories', async (req, res) => {
+  try {
+    const categories = await db.categories.getAll();
+    const maxId = Math.max(...categories.map(c => parseInt(c.id || '0')), 0);
+    const maxSortOrder = Math.max(...categories.map(c => c.sortOrder || 0), 0);
+    const category = { ...req.body, id: (maxId + 1).toString(), sortOrder: maxSortOrder + 1 };
+    const newCategory = await db.categories.create(category);
+    res.json(newCategory);
+  } catch (error) {
+    console.error('Create category error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/categories/:id', async (req, res) => {
+  try {
+    const updatedCategory = await db.categories.update(req.params.id, req.body);
+    res.json(updatedCategory);
+  } catch (error) {
+    console.error('Update category error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/categories/:id', async (req, res) => {
+  try {
+    await db.categories.delete(req.params.id);
+    res.status(204).end();
+  } catch (error) {
+    console.error('Delete category error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/featured-works', async (req, res) => {
+  try {
+    const featured = await db.featuredWorks.getAll();
+    res.json(featured);
+  } catch (error) {
+    console.error('Get featured works error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/featured-works', async (req, res) => {
+  try {
+    const { portfolioId } = req.body;
+    const fw = { id: `fw${Date.now()}`, portfolioId: portfolioId, sortOrder: 0 };
+    const result = await db.featuredWorks.create(fw);
+    res.json(result);
+  } catch (error) {
+    console.error('Add featured work error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/featured-works/sort', async (req, res) => {
+  try {
+    const result = await db.featuredWorks.updateSort(req.body);
+    res.json(result);
+  } catch (error) {
+    console.error('Update featured sort error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/featured-works/:id', async (req, res) => {
+  try {
+    await db.featuredWorks.delete(req.params.id);
+    const works = await db.featuredWorks.getAll();
+    res.json(works);
+  } catch (error) {
+    console.error('Remove featured work error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/home-content', async (req, res) => {
+  try {
+    const content = await db.homeContent.get();
+    res.json(content);
+  } catch (error) {
+    console.error('Get home content error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/home-content', async (req, res) => {
+  try {
+    const updatedContent = await db.homeContent.update(req.body);
+    res.json(updatedContent);
+  } catch (error) {
+    console.error('Update home content error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/team-members', async (req, res) => {
+  try {
+    const members = await db.teamMembers.getAll();
+    res.json(members);
+  } catch (error) {
+    console.error('Get team members error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/team-members', async (req, res) => {
+  try {
+    const members = await db.teamMembers.getAll();
+    const maxSortOrder = Math.max(...members.map(m => m.sortOrder || 0), 0);
+    const member = { ...req.body, sortOrder: maxSortOrder + 1 };
+    const newMember = await db.teamMembers.create(member);
+    res.json(newMember);
+  } catch (error) {
+    console.error('Create team member error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/team-members/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const updatedMember = await db.teamMembers.update(id, req.body);
+    res.json(updatedMember);
+  } catch (error) {
+    console.error('Update team member error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/team-members/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    await db.teamMembers.delete(id);
+    res.status(204).end();
+  } catch (error) {
+    console.error('Delete team member error:', error);
+    res.status(500).json({ error: error.message });
+  }
 });
 
 app.listen(port, () => {

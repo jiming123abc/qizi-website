@@ -22,10 +22,10 @@ import {
   updatePortfolioItem, 
   deletePortfolioItem,
   updatePortfolioItemsSortOrder,
-  getCategories,
+  getCategoriesWithDetails,
   PortfolioItem 
 } from '../../data/store';
-import { uploadImage, uploadVideo } from '../../lib/ossUtils';
+import { uploadImage, uploadVideo, UploadError } from '../../lib/ossUtils';
 import { validateVodUrl } from '../../lib/vodUtils';
 
 type ViewMode = 'list' | 'create' | 'edit';
@@ -73,24 +73,35 @@ export function PortfolioAdmin() {
     shortDesc: '',
     fullDesc: '',
     img: '',
+    images: [] as string[],
     videoUrl: '',
     type: 'image' as 'image' | 'video',
     color: 'text-primary',
     bgGlow: 'bg-primary/20'
   });
+  const [additionalImagesUploading, setAdditionalImagesUploading] = useState(false);
 
   useEffect(() => {
     refreshItems();
+    loadCategories();
   }, []);
 
-  useEffect(() => {
-    const cats = getCategories().filter(c => c.name !== '全部作品').map(c => c.name);
-    setCategories(cats);
-  }, []);
+  const loadCategories = async () => {
+    try {
+      const cats = await getCategoriesWithDetails();
+      setCategories(cats.map(c => c.name));
+    } catch (error) {
+      console.error('Failed to load categories:', error);
+    }
+  };
 
-  const refreshItems = () => {
-    const allItems = getPortfolioItems();
-    setItems(allItems.sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0)));
+  const refreshItems = async () => {
+    try {
+      const allItems = await getPortfolioItems();
+      setItems(allItems.sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0)));
+    } catch (error) {
+      console.error('Failed to refresh items:', error);
+    }
   };
 
   const handleMoveUp = (id: number) => {
@@ -170,6 +181,7 @@ export function PortfolioAdmin() {
       shortDesc: '',
       fullDesc: '',
       img: '',
+      images: [],
       videoUrl: '',
       type: 'image',
       color: 'text-primary',
@@ -189,6 +201,7 @@ export function PortfolioAdmin() {
       shortDesc: item.shortDesc,
       fullDesc: item.fullDesc,
       img: item.img,
+      images: item.images || [],
       videoUrl: item.videoUrl || '',
       type: item.type,
       color: item.color,
@@ -204,7 +217,7 @@ export function PortfolioAdmin() {
     }
   };
 
-  const handleImageUpload = async (file: File) => {
+  const handleImageUpload = async (file: File, forceLocal: boolean = false) => {
     setIsLoading(true);
     const fileSizeKB = (file.size / 1024).toFixed(1);
     
@@ -217,7 +230,7 @@ export function PortfolioAdmin() {
     try {
       const result = await uploadImage(file, (progress) => {
         setImageUploadStatus({ ...progress, phase: progress.phase === 'uploading' ? 'uploading' : 'uploading' });
-      });
+      }, forceLocal);
       
       setFormData(prev => ({ ...prev, img: result.url }));
       
@@ -227,17 +240,27 @@ export function PortfolioAdmin() {
         progress: 100 
       }));
     } catch (error) {
-      setImageUploadStatus({ 
-        phase: 'done', 
-        progress: 0, 
-        message: `上传失败: ${(error as Error).message}` 
-      });
+      const uploadError = error as UploadError;
+      if (uploadError.ossError) {
+        const useLocal = confirm(
+          `${uploadError.message}\n\n是否使用本地存储？`
+        );
+        if (useLocal) {
+          await handleImageUpload(file, true);
+        }
+      } else {
+        setImageUploadStatus({ 
+          phase: 'done', 
+          progress: 0, 
+          message: `上传失败: ${uploadError.message}` 
+        });
+      }
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleVideoUpload = async (file: File) => {
+  const handleVideoUpload = async (file: File, forceLocal: boolean = false) => {
     setIsLoading(true);
     const isMP4 = file.type === 'video/mp4';
     const fileSizeKB = (file.size / 1024).toFixed(1);
@@ -260,7 +283,7 @@ export function PortfolioAdmin() {
     try {
       const result = await uploadVideo(file, (progress) => {
         setVideoUploadStatus({ ...progress, phase: progress.phase as any });
-      });
+      }, forceLocal);
       
       setFormData(prev => ({ ...prev, videoUrl: result.url }));
       if (!formData.img && result.coverUrl) {
@@ -273,17 +296,70 @@ export function PortfolioAdmin() {
         progress: 100 
       }));
     } catch (error) {
-      setVideoUploadStatus({ 
-        phase: 'done', 
-        progress: 0, 
-        message: `上传失败: ${(error as Error).message}` 
-      });
+      const uploadError = error as UploadError;
+      if (uploadError.ossError) {
+        const useLocal = confirm(
+          `${uploadError.message}\n\n是否使用本地存储？`
+        );
+        if (useLocal) {
+          await handleVideoUpload(file, true);
+        }
+      } else {
+        setVideoUploadStatus({ 
+          phase: 'done', 
+          progress: 0, 
+          message: `上传失败: ${uploadError.message}` 
+        });
+      }
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleSubmit = () => {
+  const handleAdditionalImageUpload = async (file: File, forceLocal: boolean = false) => {
+    setAdditionalImagesUploading(true);
+    const fileSizeKB = (file.size / 1024).toFixed(1);
+    
+    try {
+      const result = await uploadImage(file, undefined, forceLocal);
+      setFormData(prev => ({ 
+        ...prev, 
+        images: [...(prev.images || []), result.url] 
+      }));
+    } catch (error) {
+      const uploadError = error as UploadError;
+      if (uploadError.ossError) {
+        const useLocal = confirm(
+          `${uploadError.message}\n\n是否使用本地存储？`
+        );
+        if (useLocal) {
+          await handleAdditionalImageUpload(file, true);
+        }
+      } else {
+        alert(`上传失败: ${uploadError.message}`);
+      }
+    } finally {
+      setAdditionalImagesUploading(false);
+    }
+  };
+
+  const handleMultipleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    for (const file of files) {
+      await handleAdditionalImageUpload(file);
+    }
+    // Clear the input
+    e.target.value = '';
+  };
+
+  const removeAdditionalImage = (index: number) => {
+    setFormData(prev => ({
+      ...prev,
+      images: (prev.images || []).filter((_, i) => i !== index)
+    }));
+  };
+
+  const handleSubmit = async () => {
     if (!formData.title || !formData.category || !formData.img) {
       alert('请填写必填字段：标题、分类和封面图片');
       return;
@@ -294,14 +370,19 @@ export function PortfolioAdmin() {
       return;
     }
 
-    if (viewMode === 'create') {
-      addPortfolioItem(formData);
-    } else if (viewMode === 'edit' && editingItem) {
-      updatePortfolioItem({ ...formData, id: editingItem.id });
-    }
+    try {
+      if (viewMode === 'create') {
+        await addPortfolioItem(formData);
+      } else if (viewMode === 'edit' && editingItem) {
+        await updatePortfolioItem({ ...formData, id: editingItem.id, sortOrder: editingItem.sortOrder });
+      }
 
-    setViewMode('list');
-    refreshItems();
+      setViewMode('list');
+      await refreshItems();
+    } catch (error) {
+      console.error('保存失败:', error);
+      alert('保存失败，请重试');
+    }
   };
 
   const handleCancel = () => {
@@ -627,6 +708,50 @@ export function PortfolioAdmin() {
                     )}
                   </div>
                 )}
+              </div>
+            )}
+
+            {formData.type === 'image' && (
+              <div>
+                <label className="block text-sm font-label text-on-surface mb-2">更多图片</label>
+                {additionalImagesUploading && (
+                  <div className="mb-3 p-3 rounded-xl bg-surface-container border border-white/10 text-sm text-on-surface-variant">
+                    <Loader2 className="w-4 h-4 inline-block mr-2 animate-spin" />
+                    正在上传图片...
+                  </div>
+                )}
+                <div className="grid grid-cols-4 gap-3 mb-3">
+                  {/* Upload button */}
+                  <label className="flex flex-col items-center justify-center aspect-square rounded-xl border-2 border-dashed border-white/20 cursor-pointer hover:border-primary/50 transition-colors bg-surface-container-low hover:bg-surface-container">
+                    <Plus className="w-6 h-6 text-on-surface-variant mb-1" />
+                    <span className="text-xs text-on-surface-variant">添加图片</span>
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,image/gif"
+                      multiple
+                      onChange={handleMultipleImageUpload}
+                      className="hidden"
+                    />
+                  </label>
+                  {/* Existing images */}
+                  {(formData.images || []).map((imageUrl, index) => (
+                    <div key={index} className="relative aspect-square rounded-xl overflow-hidden border border-white/10 bg-surface-container-low group">
+                      <img src={imageUrl} alt={`图片 ${index + 1}`} className="w-full h-full object-cover" />
+                      <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                        <button
+                          type="button"
+                          onClick={() => removeAdditionalImage(index)}
+                          className="p-2 rounded-full bg-red-500/80 text-white hover:bg-red-500 transition-colors"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-xs text-on-surface-variant/50">
+                  添加更多案例图片（可选），支持多选上传
+                </p>
               </div>
             )}
 
