@@ -73,6 +73,14 @@ server {
     listen 80;
     server_name your-domain.com;
 
+    # 上传文件大小限制（根据需要调整）
+    client_max_body_size 2048M;
+
+    # 全局代理超时设置（30分钟）
+    proxy_connect_timeout 300s;
+    proxy_send_timeout 1800s;
+    proxy_read_timeout 1800s;
+
     location / {
         root /var/www/ai-studio/dist;
         try_files $uri $uri/ /index.html;
@@ -80,10 +88,36 @@ server {
 
     location /api/ {
         proxy_pass http://localhost:5000/;
+        proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # API代理超时设置（30分钟）
+        proxy_connect_timeout 300s;
+        proxy_send_timeout 1800s;
+        proxy_read_timeout 1800s;
+        proxy_buffering off;
+        proxy_request_buffering off;
+    }
+
+    # 大文件上传专用配置（视频/图片上传）
+    location /api/upload/ {
+        proxy_pass http://localhost:5000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        
+        # 上传超时设置（30分钟）
+        proxy_connect_timeout 300s;
+        proxy_send_timeout 1800s;
+        proxy_read_timeout 1800s;
+        
+        # 禁用代理缓冲（对大文件上传很重要）
+        proxy_buffering off;
+        proxy_request_buffering off;
     }
 
     add_header X-Frame-Options "SAMEORIGIN";
@@ -91,6 +125,8 @@ server {
     add_header X-Content-Type-Options "nosniff";
 }
 ```
+
+**重要说明**：如果不配置Nginx超时，大文件（特别是需要压缩的视频）上传时会遇到504 Gateway Timeout错误，因为Nginx默认的代理超时时间很短。
 
 启用配置：
 
@@ -183,6 +219,44 @@ pm2 restart ai-studio-server
 2. **404 Not Found** - 前端文件路径错误
 3. **上传失败** - 检查OSS配置和CORS规则
 4. **HTTPS问题** - 检查Cloudflare SSL配置
+5. **504 Gateway Timeout** - 大文件上传超时，**必须配置Nginx代理超时**（见上文Nginx配置第6步）
+
+### 大文件上传504超时问题
+
+如果上传大文件（特别是需要压缩的视频）时出现504错误，必须配置Nginx的代理超时时间：
+
+```bash
+# 编辑Nginx配置
+sudo nano /etc/nginx/sites-available/ai-studio
+```
+
+在 `location /api/upload/` 块中添加或修改以下配置：
+
+```nginx
+location /api/upload/ {
+    proxy_pass http://localhost:5000;
+    proxy_http_version 1.1;
+    
+    # 超时设置（关键！）
+    proxy_connect_timeout 300s;
+    proxy_send_timeout 1800s;
+    proxy_read_timeout 1800s;
+    proxy_buffering off;
+    proxy_request_buffering off;
+}
+```
+
+然后重启Nginx：
+
+```bash
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+**常见原因**：
+- 视频压缩时间过长（大文件可能需要5-30分钟）
+- 网络上传速度慢
+- OSS连接不稳定
 
 ### 日志查看
 
