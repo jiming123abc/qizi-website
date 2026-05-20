@@ -1,9 +1,42 @@
+// 文件大小限制配置（与后端一致）
+const FILE_SIZE_LIMITS = {
+  image: 20 * 1024 * 1024, // 图片：20MB
+  video: 1024 * 1024 * 1024 // 视频：1GB
+};
+
+// 文件类型白名单
+const ALLOWED_MIME_TYPES = {
+  image: ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif'],
+  video: ['video/mp4', 'video/webm', 'video/ogg', 'video/quicktime']
+};
+
 export interface OSSConfig {
   accessKeyId: string;
   accessKeySecret: string;
   bucket: string;
   region: string;
   endpoint: string;
+}
+
+// 验证文件大小
+function validateFileSize(file: File, type: 'image' | 'video'): { valid: boolean; maxSizeMB: number } {
+  const maxSize = FILE_SIZE_LIMITS[type];
+  return {
+    valid: file.size <= maxSize,
+    maxSizeMB: maxSize / (1024 * 1024)
+  };
+}
+
+// 验证文件类型
+function validateFileType(file: File, type: 'image' | 'video'): boolean {
+  return ALLOWED_MIME_TYPES[type].includes(file.type);
+}
+
+// 格式化文件大小显示
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
 }
 
 export function generateOSSConfig(): OSSConfig {
@@ -99,9 +132,16 @@ export async function uploadImage(
   onProgress?: (progress: UploadProgress) => void,
   forceLocal: boolean = false
 ): Promise<UploadResult> {
-  const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
-  if (!allowedTypes.includes(file.type)) {
+  // 验证文件类型
+  if (!validateFileType(file, 'image')) {
     throw new Error('不支持的图片格式，请上传 JPG、PNG、WebP 或 GIF 格式');
+  }
+  
+  // 验证文件大小
+  const sizeValidation = validateFileSize(file, 'image');
+  if (!sizeValidation.valid) {
+    const fileSizeMB = (file.size / (1024 * 1024)).toFixed(2);
+    throw new Error(`图片大小不能超过 ${sizeValidation.maxSizeMB}MB，当前文件大小: ${fileSizeMB}MB`);
   }
 
   const fileSizeKB = (file.size / 1024).toFixed(1);
@@ -118,6 +158,9 @@ export async function uploadImage(
 
     const xhr = new XMLHttpRequest();
     xhr.open('POST', url.toString());
+
+    // 设置超时时间（5分钟）
+    xhr.timeout = 300000;
 
     xhr.upload.addEventListener('progress', (event) => {
       if (event.loaded && event.total) {
@@ -159,6 +202,10 @@ export async function uploadImage(
       reject(new Error('网络错误'));
     });
 
+    xhr.addEventListener('timeout', () => {
+      reject(new Error('上传超时'));
+    });
+
     xhr.send(formData);
   });
 }
@@ -168,9 +215,16 @@ export async function uploadVideo(
   onProgress?: (progress: UploadProgress) => void,
   forceLocal: boolean = false
 ): Promise<{ url: string; coverUrl: string }> {
-  const allowedTypes = ['video/mp4', 'video/webm', 'video/ogg'];
-  if (!allowedTypes.includes(file.type)) {
-    throw new Error('不支持的视频格式，请上传 MP4、WebM 或 OGG 格式');
+  // 验证文件类型
+  if (!validateFileType(file, 'video')) {
+    throw new Error('不支持的视频格式，请上传 MP4、WebM、OGG 或 MOV 格式');
+  }
+  
+  // 验证文件大小
+  const sizeValidation = validateFileSize(file, 'video');
+  if (!sizeValidation.valid) {
+    const fileSizeMB = (file.size / (1024 * 1024)).toFixed(2);
+    throw new Error(`视频大小不能超过 ${sizeValidation.maxSizeMB}MB，当前文件大小: ${fileSizeMB}MB`);
   }
 
   const isMP4 = file.type === 'video/mp4';
@@ -195,8 +249,8 @@ export async function uploadVideo(
     const xhr = new XMLHttpRequest();
     xhr.open('POST', url.toString());
 
-    // 设置超时时间（10分钟）
-    xhr.timeout = 600000;
+    // 设置超时时间（30分钟）
+    xhr.timeout = 1800000;
 
     // 文件大小超过50MB时显示警告
     if (file.size > 50 * 1024 * 1024) {
