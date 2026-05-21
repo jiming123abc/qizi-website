@@ -48,26 +48,15 @@ export function PortfolioView() {
     }
   }, [items]);
 
-  // Update URL on selection
+  // Update URL only when user clicks share (handled in handleShare)
+  // Do NOT update URL or share metadata when just opening the detail modal
   useEffect(() => {
-    const url = new URL(window.location.href);
-    if (selectedItem) {
-      url.searchParams.set('id', selectedItem.id.toString());
-    } else {
+    // When closing, restore default URL and share metadata
+    if (!selectedItem) {
+      const url = new URL(window.location.href);
       url.searchParams.delete('id');
-    }
-    window.history.replaceState({}, '', url.toString());
-
-    // Update share metadata if selected
-    if (selectedItem) {
-      setupShareMetadata({
-        title: selectedItem.title,
-        desc: selectedItem.shortDesc || selectedItem.fullDesc || selectedItem.category,
-        link: url.toString(),
-        imgUrl: selectedItem.img
-      });
-    } else {
-      // Restore default share metadata when closing
+      window.history.replaceState({}, '', url.toString());
+      
       setupShareMetadata({
         title: defaultShareTitle,
         desc: defaultShareDescription,
@@ -79,6 +68,18 @@ export function PortfolioView() {
 
   const handleShare = async () => {
     if (!selectedItem) return;
+    
+    // Update URL and share metadata only when user clicks share
+    const url = new URL(window.location.href);
+    url.searchParams.set('id', selectedItem.id.toString());
+    window.history.replaceState({}, '', url.toString());
+
+    setupShareMetadata({
+      title: selectedItem.title,
+      desc: selectedItem.shortDesc || selectedItem.fullDesc || selectedItem.category,
+      link: url.toString(),
+      imgUrl: selectedItem.img
+    });
     
     // 使用分享落地页链接
     const shareUrl = `${window.location.origin}/share/work/${selectedItem.id}`;
