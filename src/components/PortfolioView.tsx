@@ -65,20 +65,17 @@ export function PortfolioView() {
   const handleShare = async () => {
     if (!selectedItem) return;
     
-    // Update URL and share metadata only when user clicks share
-    const url = new URL(window.location.href);
-    url.searchParams.set('id', selectedItem.id.toString());
-    window.history.replaceState({}, '', url.toString());
-
+    // 只在点击分享时，临时设置分享信息（但不修改主应用 URL！）
+    const shareUrl = `${window.location.origin}/share/work/${selectedItem.id}`;
+    
     setupShareMetadata({
       title: selectedItem.title,
       desc: selectedItem.shortDesc || selectedItem.fullDesc || selectedItem.category,
-      link: url.toString(),
+      link: shareUrl,  // 使用分享落地页
       imgUrl: selectedItem.img
     });
     
-    // 使用分享落地页链接
-    const shareUrl = `${window.location.origin}/share/work/${selectedItem.id}`;
+    // 复制分享落地页链接
     const copied = await copyToClipboard(shareUrl);
 
     if (copied) {

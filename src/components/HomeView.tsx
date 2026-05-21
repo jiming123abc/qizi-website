@@ -210,19 +210,34 @@ export function HomeView() {
   const handleShare = async () => {
     if (!selectedItem) return;
     
-    // Update URL and share metadata only when user clicks share
-    const url = new URL(window.location.href);
-    url.searchParams.set('id', selectedItem.id);
-    window.history.replaceState({}, '', url.toString());
-
+    let shareUrl: string;
+    let shareTitle: string;
+    let shareDesc: string;
+    let shareImg: string;
+    
+    // 判断是否是作品（有 portfolio ID），使用分享落地页
+    if ('id' in selectedItem && !('coverImage' in selectedItem)) {
+      // Portfolio item，使用分享落地页
+      shareUrl = `${window.location.origin}/share/work/${selectedItem.id}`;
+      shareTitle = ('title' in selectedItem ? selectedItem.title : '大连柒子文化发展有限公司');
+      shareDesc = ('shortDesc' in selectedItem ? selectedItem.shortDesc : selectedItem.category) || '诚信立足 创新致远';
+      shareImg = ('img' in selectedItem ? selectedItem.img : homeContent.heroImage || '/images/hero-home.png');
+    } else {
+      // 核心业务或分类，使用首页
+      shareUrl = window.location.origin;
+      shareTitle = ('name' in selectedItem ? selectedItem.name : selectedItem.title) || '大连柒子文化发展有限公司';
+      shareDesc = ('category' in selectedItem ? selectedItem.category : '大连柒子文化');
+      shareImg = ('coverImage' in selectedItem ? selectedItem.coverImage : selectedItem.img) || homeContent.heroImage || '/images/hero-home.png';
+    }
+    
+    // 只在点击分享时，临时设置分享信息（但不修改主应用 URL！）
     setupShareMetadata({
-      title: ('name' in selectedItem ? selectedItem.name : selectedItem.title),
-      desc: ('category' in selectedItem ? selectedItem.category : '大连柒子文化'),
-      link: url.toString(),
-      imgUrl: ('coverImage' in selectedItem ? selectedItem.coverImage : selectedItem.img)
+      title: shareTitle,
+      desc: shareDesc,
+      link: shareUrl,
+      imgUrl: shareImg
     });
     
-    const shareUrl = window.location.href;
     const copied = await copyToClipboard(shareUrl);
 
     if (copied) {
