@@ -1001,7 +1001,11 @@ app.get('/share/work/:id', async (req, res) => {
           .replace(/<meta name="twitter:title" content="[^"]*" \/>/, `<meta name="twitter:title" content="${escapeHtml(title)}" />`)
           .replace(/<meta name="twitter:description" content="[^"]*" \/>/, `<meta name="twitter:description" content="${escapeHtml(description)}" />`)
           .replace(/<meta name="twitter:image" content="[^"]*" \/>/, `<meta name="twitter:image" content="${getFullImageUrl(image, req)}" />`)
-          .replace(/<title>[^<]*<\/title>/, `<title>${escapeHtml(title)}</title>`);
+          .replace(/<title>[^<]*<\/title>/, `<title>${escapeHtml(title)}</title>`)
+          // 替换页面上显示的内容
+          .replace(/<img src="[^"]*" alt="作品预览" id="workImage" \/>/, `<img src="${getFullImageUrl(image, req)}" alt="作品预览" id="workImage" />`)
+          .replace(/<h1 class="work-title" id="workTitle">[^<]*<\/h1>/, `<h1 class="work-title" id="workTitle">${escapeHtml(title)}</h1>`)
+          .replace(/<p class="work-desc" id="workDesc">[^<]*<\/p>/, `<p class="work-desc" id="workDesc">${escapeHtml(description)}</p>`);
         
         console.log(`为作品 ID ${workId} 渲染了分享落地页`);
       } else {
