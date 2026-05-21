@@ -193,26 +193,15 @@ export function HomeView() {
     }
   }, [featuredItems]);
 
-  // Update URL on selection
+  // Update URL only when user clicks share (handled in handleShare)
+  // Do NOT update URL or share metadata when just opening the detail modal
   useEffect(() => {
-    const url = new URL(window.location.href);
-    if (selectedItem) {
-      url.searchParams.set('id', selectedItem.id);
-    } else {
+    // When closing, restore default URL and share metadata
+    if (!selectedItem) {
+      const url = new URL(window.location.href);
       url.searchParams.delete('id');
-    }
-    window.history.replaceState({}, '', url.toString());
-
-    // Update share metadata if selected
-    if (selectedItem) {
-      setupShareMetadata({
-        title: ('name' in selectedItem ? selectedItem.name : selectedItem.title),
-        desc: ('category' in selectedItem ? selectedItem.category : '大连柒子文化'),
-        link: url.toString(),
-        imgUrl: ('coverImage' in selectedItem ? selectedItem.coverImage : selectedItem.img)
-      });
-    } else {
-      // Restore default share metadata when closing
+      window.history.replaceState({}, '', url.toString());
+      
       setupShareMetadata({
         title: homeContent.shareTitle || '大连柒子文化发展有限公司',
         desc: homeContent.shareDescription || '诚信立足 创新致远',
@@ -224,6 +213,18 @@ export function HomeView() {
 
   const handleShare = async () => {
     if (!selectedItem) return;
+    
+    // Update URL and share metadata only when user clicks share
+    const url = new URL(window.location.href);
+    url.searchParams.set('id', selectedItem.id);
+    window.history.replaceState({}, '', url.toString());
+
+    setupShareMetadata({
+      title: ('name' in selectedItem ? selectedItem.name : selectedItem.title),
+      desc: ('category' in selectedItem ? selectedItem.category : '大连柒子文化'),
+      link: url.toString(),
+      imgUrl: ('coverImage' in selectedItem ? selectedItem.coverImage : selectedItem.img)
+    });
     
     const shareUrl = window.location.href;
     const copied = await copyToClipboard(shareUrl);
@@ -487,6 +488,7 @@ export function HomeView() {
       <Modal 
         isOpen={!!selectedItem} 
         onClose={() => setSelectedItem(null)} 
+        onShare={handleShare}
       >
         {selectedItem && (
           <div className="flex flex-col h-full relative">
