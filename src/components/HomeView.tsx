@@ -193,11 +193,39 @@ export function HomeView() {
     }
   }, [featuredItems]);
 
-  // Update share metadata only when user clicks share
-  // Do NOT update URL when opening/closing the detail modal to avoid WeChat bottom bar
+  // Update share metadata when opening/closing detail modal
+  // Do NOT update URL to avoid WeChat bottom bar
   useEffect(() => {
-    // When closing, restore default share metadata (but do NOT change URL)
-    if (!selectedItem) {
+    if (selectedItem) {
+      // When opening detail, set share info for the item
+      let shareTitle: string;
+      let shareDesc: string;
+      let shareImg: string;
+      let shareUrl: string;
+      
+      // 判断是否是作品（有 portfolio ID），使用分享落地页
+      if ('id' in selectedItem && !('coverImage' in selectedItem)) {
+        // Portfolio item，使用分享落地页
+        shareUrl = `${window.location.origin}/share/work/${selectedItem.id}`;
+        shareTitle = ('title' in selectedItem ? selectedItem.title : '大连柒子文化发展有限公司');
+        shareDesc = ('shortDesc' in selectedItem ? selectedItem.shortDesc : selectedItem.category) || '诚信立足 创新致远';
+        shareImg = ('img' in selectedItem ? selectedItem.img : homeContent.heroImage || '/images/hero-home.png');
+      } else {
+        // 核心业务或分类，使用首页
+        shareUrl = window.location.origin;
+        shareTitle = ('name' in selectedItem ? selectedItem.name : selectedItem.title) || '大连柒子文化发展有限公司';
+        shareDesc = ('category' in selectedItem ? selectedItem.category : '大连柒子文化');
+        shareImg = ('coverImage' in selectedItem ? selectedItem.coverImage : selectedItem.img) || homeContent.heroImage || '/images/hero-home.png';
+      }
+      
+      setupShareMetadata({
+        title: shareTitle,
+        desc: shareDesc,
+        link: shareUrl,
+        imgUrl: shareImg
+      });
+    } else {
+      // When closing, restore default share metadata
       setupShareMetadata({
         title: homeContent.shareTitle || '大连柒子文化发展有限公司',
         desc: homeContent.shareDescription || '诚信立足 创新致远',
@@ -211,32 +239,15 @@ export function HomeView() {
     if (!selectedItem) return;
     
     let shareUrl: string;
-    let shareTitle: string;
-    let shareDesc: string;
-    let shareImg: string;
     
     // 判断是否是作品（有 portfolio ID），使用分享落地页
     if ('id' in selectedItem && !('coverImage' in selectedItem)) {
       // Portfolio item，使用分享落地页
       shareUrl = `${window.location.origin}/share/work/${selectedItem.id}`;
-      shareTitle = ('title' in selectedItem ? selectedItem.title : '大连柒子文化发展有限公司');
-      shareDesc = ('shortDesc' in selectedItem ? selectedItem.shortDesc : selectedItem.category) || '诚信立足 创新致远';
-      shareImg = ('img' in selectedItem ? selectedItem.img : homeContent.heroImage || '/images/hero-home.png');
     } else {
       // 核心业务或分类，使用首页
       shareUrl = window.location.origin;
-      shareTitle = ('name' in selectedItem ? selectedItem.name : selectedItem.title) || '大连柒子文化发展有限公司';
-      shareDesc = ('category' in selectedItem ? selectedItem.category : '大连柒子文化');
-      shareImg = ('coverImage' in selectedItem ? selectedItem.coverImage : selectedItem.img) || homeContent.heroImage || '/images/hero-home.png';
     }
-    
-    // 只在点击分享时，临时设置分享信息（但不修改主应用 URL！）
-    setupShareMetadata({
-      title: shareTitle,
-      desc: shareDesc,
-      link: shareUrl,
-      imgUrl: shareImg
-    });
     
     const copied = await copyToClipboard(shareUrl);
 

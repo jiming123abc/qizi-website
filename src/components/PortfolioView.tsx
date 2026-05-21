@@ -48,11 +48,21 @@ export function PortfolioView() {
     }
   }, [items]);
 
-  // Update share metadata only when user clicks share
-  // Do NOT update URL when opening/closing the detail modal to avoid WeChat bottom bar
+  // Update share metadata when opening/closing detail modal
+  // Do NOT update URL to avoid WeChat bottom bar
   useEffect(() => {
-    // When closing, restore default share metadata (but do NOT change URL)
-    if (!selectedItem) {
+    if (selectedItem) {
+      // When opening detail, set share info for the item
+      const shareUrl = `${window.location.origin}/share/work/${selectedItem.id}`;
+      
+      setupShareMetadata({
+        title: selectedItem.title,
+        desc: selectedItem.shortDesc || selectedItem.fullDesc || selectedItem.category,
+        link: shareUrl,
+        imgUrl: selectedItem.img
+      });
+    } else {
+      // When closing, restore default share metadata
       setupShareMetadata({
         title: defaultShareTitle,
         desc: defaultShareDescription,
@@ -65,17 +75,8 @@ export function PortfolioView() {
   const handleShare = async () => {
     if (!selectedItem) return;
     
-    // 只在点击分享时，临时设置分享信息（但不修改主应用 URL！）
-    const shareUrl = `${window.location.origin}/share/work/${selectedItem.id}`;
-    
-    setupShareMetadata({
-      title: selectedItem.title,
-      desc: selectedItem.shortDesc || selectedItem.fullDesc || selectedItem.category,
-      link: shareUrl,  // 使用分享落地页
-      imgUrl: selectedItem.img
-    });
-    
     // 复制分享落地页链接
+    const shareUrl = `${window.location.origin}/share/work/${selectedItem.id}`;
     const copied = await copyToClipboard(shareUrl);
 
     if (copied) {
