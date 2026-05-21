@@ -48,19 +48,15 @@ export function PortfolioView() {
     }
   }, [items]);
 
-  // Update URL only when user clicks share (handled in handleShare)
-  // Do NOT update URL or share metadata when just opening the detail modal
+  // Update share metadata only when user clicks share
+  // Do NOT update URL when opening/closing the detail modal to avoid WeChat bottom bar
   useEffect(() => {
-    // When closing, restore default URL and share metadata
+    // When closing, restore default share metadata (but do NOT change URL)
     if (!selectedItem) {
-      const url = new URL(window.location.href);
-      url.searchParams.delete('id');
-      window.history.replaceState({}, '', url.toString());
-      
       setupShareMetadata({
         title: defaultShareTitle,
         desc: defaultShareDescription,
-        link: url.toString(),
+        link: window.location.href,
         imgUrl: defaultImage
       });
     }

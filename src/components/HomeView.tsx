@@ -193,19 +193,15 @@ export function HomeView() {
     }
   }, [featuredItems]);
 
-  // Update URL only when user clicks share (handled in handleShare)
-  // Do NOT update URL or share metadata when just opening the detail modal
+  // Update share metadata only when user clicks share
+  // Do NOT update URL when opening/closing the detail modal to avoid WeChat bottom bar
   useEffect(() => {
-    // When closing, restore default URL and share metadata
+    // When closing, restore default share metadata (but do NOT change URL)
     if (!selectedItem) {
-      const url = new URL(window.location.href);
-      url.searchParams.delete('id');
-      window.history.replaceState({}, '', url.toString());
-      
       setupShareMetadata({
         title: homeContent.shareTitle || '大连柒子文化发展有限公司',
         desc: homeContent.shareDescription || '诚信立足 创新致远',
-        link: url.toString(),
+        link: window.location.href,
         imgUrl: homeContent.heroImage || '/images/hero-home.png'
       });
     }
