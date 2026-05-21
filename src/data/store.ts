@@ -66,113 +66,109 @@ export interface CategoryWithDetails extends Category {
 
 const API_BASE = '/api';
 
-export async function getPortfolioItems(): Promise<PortfolioItem[]> {
-  const res = await fetch(`${API_BASE}/portfolio-items`);
-  if (!res.ok) throw new Error('Failed to fetch portfolio items');
+// ================= 通用 API 工具函数 =================
+
+// 通用 GET 请求
+async function apiGet<T>(endpoint: string, errorMessage: string): Promise<T> {
+  const res = await fetch(`${API_BASE}/${endpoint}`);
+  if (!res.ok) throw new Error(errorMessage);
   return res.json();
+}
+
+// 通用 POST 请求
+async function apiPost<T, Body = unknown>(endpoint: string, body: Body, errorMessage: string): Promise<T> {
+  const res = await fetch(`${API_BASE}/${endpoint}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) throw new Error(errorMessage);
+  return res.json();
+}
+
+// 通用 PUT 请求
+async function apiPut<Body = unknown>(endpoint: string, body: Body, errorMessage: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/${endpoint}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) throw new Error(errorMessage);
+}
+
+// 通用 DELETE 请求
+async function apiDelete(endpoint: string, errorMessage: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/${endpoint}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error(errorMessage);
+}
+
+// 通用批量更新函数
+async function saveItems<T extends { id: any }>(endpoint: string, items: T[]): Promise<void> {
+  for (const item of items) {
+    await apiPut(`${endpoint}/${item.id}`, item, `Failed to update ${endpoint} item`);
+  }
+}
+
+// ================= Portfolio Items API =================
+
+export async function getPortfolioItems(): Promise<PortfolioItem[]> {
+  return apiGet<PortfolioItem[]>('portfolio-items', 'Failed to fetch portfolio items');
 }
 
 export async function savePortfolioItems(items: PortfolioItem[]): Promise<void> {
-  for (const item of items) {
-    await fetch(`${API_BASE}/portfolio-items/${item.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(item)
-    });
-  }
+  return saveItems('portfolio-items', items);
 }
 
 export async function addPortfolioItem(item: Omit<PortfolioItem, 'id'>): Promise<PortfolioItem> {
-  const res = await fetch(`${API_BASE}/portfolio-items`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(item)
-  });
-  if (!res.ok) throw new Error('Failed to add portfolio item');
-  return res.json();
+  return apiPost<PortfolioItem, typeof item>('portfolio-items', item, 'Failed to add portfolio item');
 }
 
 export async function updatePortfolioItemsSortOrder(items: PortfolioItem[]): Promise<void> {
-  await savePortfolioItems(items);
+  return savePortfolioItems(items);
 }
 
 export async function updatePortfolioItem(item: PortfolioItem): Promise<void> {
-  const res = await fetch(`${API_BASE}/portfolio-items/${item.id}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(item)
-  });
-  if (!res.ok) throw new Error('Failed to update portfolio item');
+  return apiPut(`portfolio-items/${item.id}`, item, 'Failed to update portfolio item');
 }
 
 export async function deletePortfolioItem(id: number): Promise<void> {
-  const res = await fetch(`${API_BASE}/portfolio-items/${id}`, { method: 'DELETE' });
-  if (!res.ok) throw new Error('Failed to delete portfolio item');
+  return apiDelete(`portfolio-items/${id}`, 'Failed to delete portfolio item');
 }
 
+// ================= Categories API =================
+
 export async function getCategories(): Promise<Category[]> {
-  const res = await fetch(`${API_BASE}/categories`);
-  if (!res.ok) throw new Error('Failed to fetch categories');
-  return res.json();
+  return apiGet<Category[]>('categories', 'Failed to fetch categories');
 }
 
 export async function saveCategories(categories: Category[]): Promise<void> {
-  for (const cat of categories) {
-    await fetch(`${API_BASE}/categories/${cat.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(cat)
-    });
-  }
+  return saveItems('categories', categories);
 }
 
 export async function addCategory(name: string): Promise<Category> {
-  const res = await fetch(`${API_BASE}/categories`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name })
-  });
-  if (!res.ok) throw new Error('Failed to add category');
-  return res.json();
+  return apiPost<Category, { name: string }>('categories', { name }, 'Failed to add category');
 }
 
 export async function updateCategory(id: string, name: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/categories/${id}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name })
-  });
-  if (!res.ok) throw new Error('Failed to update category');
+  return apiPut(`categories/${id}`, { name }, 'Failed to update category');
 }
 
 export async function deleteCategory(id: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/categories/${id}`, { method: 'DELETE' });
-  if (!res.ok) throw new Error('Failed to delete category');
+  return apiDelete(`categories/${id}`, 'Failed to delete category');
 }
 
+// ================= Featured Works API =================
+
 export async function getFeaturedWorks(): Promise<FeaturedWork[]> {
-  const res = await fetch(`${API_BASE}/featured-works`);
-  if (!res.ok) throw new Error('Failed to fetch featured works');
-  return res.json();
+  return apiGet<FeaturedWork[]>('featured-works', 'Failed to fetch featured works');
 }
 
 export async function saveFeaturedWorks(works: FeaturedWork[]): Promise<void> {
-  const res = await fetch(`${API_BASE}/featured-works/sort`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(works)
-  });
-  if (!res.ok) throw new Error('Failed to update featured works');
+  return apiPut('featured-works/sort', works, 'Failed to update featured works');
 }
 
 export async function addFeaturedWork(portfolioId: number): Promise<FeaturedWork[]> {
-  const res = await fetch(`${API_BASE}/featured-works`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ portfolioId })
-  });
-  if (!res.ok) throw new Error('Failed to add featured work');
-  return res.json();
+  return apiPost<FeaturedWork[], { portfolioId: number }>('featured-works', { portfolioId }, 'Failed to add featured work');
 }
 
 export async function removeFeaturedWork(id: string): Promise<FeaturedWork[]> {
@@ -182,13 +178,13 @@ export async function removeFeaturedWork(id: string): Promise<FeaturedWork[]> {
 }
 
 export async function updateFeaturedWorkSortOrder(works: FeaturedWork[]): Promise<void> {
-  await saveFeaturedWorks(works);
+  return saveFeaturedWorks(works);
 }
 
+// ================= Home Content API =================
+
 export async function getHomeContent(): Promise<HomeContent> {
-  const res = await fetch(`${API_BASE}/home-content`);
-  if (!res.ok) throw new Error('Failed to fetch home content');
-  const data = await res.json();
+  const data = await apiGet<any>('home-content', 'Failed to fetch home content');
   // 兼容旧数据格式
   return {
     heroTitle: data.heroTitle || '',
@@ -202,98 +198,61 @@ export async function getHomeContent(): Promise<HomeContent> {
 }
 
 export async function saveHomeContent(content: HomeContent): Promise<void> {
-  const res = await fetch(`${API_BASE}/home-content`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(content)
-  });
-  if (!res.ok) throw new Error('Failed to update home content');
+  return apiPut('home-content', content, 'Failed to update home content');
 }
 
+// ================= Team Members API =================
+
 export async function getTeamMembers(): Promise<TeamMember[]> {
-  const res = await fetch(`${API_BASE}/team-members`);
-  if (!res.ok) throw new Error('Failed to fetch team members');
-  return res.json();
+  return apiGet<TeamMember[]>('team-members', 'Failed to fetch team members');
 }
 
 export async function saveTeamMembers(members: TeamMember[]): Promise<void> {
-  for (const member of members) {
-    await fetch(`${API_BASE}/team-members/${member.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(member)
-    });
-  }
+  return saveItems('team-members', members);
 }
 
 export async function addTeamMember(member: Omit<TeamMember, 'id'>): Promise<TeamMember> {
-  const res = await fetch(`${API_BASE}/team-members`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(member)
-  });
-  if (!res.ok) throw new Error('Failed to add team member');
-  return res.json();
+  return apiPost<TeamMember, typeof member>('team-members', member, 'Failed to add team member');
 }
 
 export async function updateTeamMember(member: TeamMember): Promise<void> {
-  const res = await fetch(`${API_BASE}/team-members/${member.id}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(member)
-  });
-  if (!res.ok) throw new Error('Failed to update team member');
+  return apiPut(`team-members/${member.id}`, member, 'Failed to update team member');
 }
 
 export async function deleteTeamMember(id: number): Promise<void> {
-  const res = await fetch(`${API_BASE}/team-members/${id}`, { method: 'DELETE' });
-  if (!res.ok) throw new Error('Failed to delete team member');
+  return apiDelete(`team-members/${id}`, 'Failed to delete team member');
 }
 
 export async function updateTeamMembersSortOrder(members: TeamMember[]): Promise<void> {
-  await saveTeamMembers(members);
+  return saveTeamMembers(members);
 }
 
+// ================= Categories With Details API =================
+
 export async function getCategoriesWithDetails(): Promise<CategoryWithDetails[]> {
-  const res = await fetch(`${API_BASE}/categories-details`);
-  if (!res.ok) throw new Error('Failed to fetch categories details');
-  return res.json();
+  return apiGet<CategoryWithDetails[]>('categories-details', 'Failed to fetch categories details');
 }
 
 export async function saveCategoriesWithDetails(categories: CategoryWithDetails[]): Promise<void> {
-  for (const cat of categories) {
-    await fetch(`${API_BASE}/categories-details/${cat.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(cat)
-    });
-  }
+  return saveItems('categories-details', categories);
 }
 
 export async function updateCategoryDetails(id: string, details: Partial<CategoryWithDetails>): Promise<void> {
-  const res = await fetch(`${API_BASE}/categories-details/${id}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(details)
-  });
-  if (!res.ok) throw new Error('Failed to update category details');
+  return apiPut(`categories-details/${id}`, details, 'Failed to update category details');
 }
 
 export async function addCategoryWithDetails(name: string, description: string = '', coverImage: string = '', icon: string = ''): Promise<CategoryWithDetails> {
-  const res = await fetch(`${API_BASE}/categories-details`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, description, coverImage, icon })
-  });
-  if (!res.ok) throw new Error('Failed to add category with details');
-  return res.json();
+  return apiPost<CategoryWithDetails, { name: string; description: string; coverImage: string; icon: string }>(
+    'categories-details',
+    { name, description, coverImage, icon },
+    'Failed to add category with details'
+  );
 }
 
 export async function deleteCategoryWithDetails(id: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/categories-details/${id}`, { method: 'DELETE' });
-  if (!res.ok) throw new Error('Failed to delete category details');
+  return apiDelete(`categories-details/${id}`, 'Failed to delete category details');
 }
 
 export async function updateCategoriesSortOrder(categories: CategoryWithDetails[]): Promise<void> {
-  await saveCategoriesWithDetails(categories);
+  return saveCategoriesWithDetails(categories);
 }

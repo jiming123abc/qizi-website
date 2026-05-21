@@ -40,11 +40,9 @@ export default function App() {
     const params = new URLSearchParams(window.location.search);
     const id = params.get('id');
     if (id) {
-      if (id.startsWith('fw')) {
-        setActiveTab('home');
-      } else {
-        setActiveTab('portfolio');
-      }
+      // 对于分享链接，始终跳转到 portfolio 页面，
+      // 因为 PortfolioView 可以处理所有类型的作品 ID
+      setActiveTab('portfolio');
     }
 
     const admin = params.get('admin');

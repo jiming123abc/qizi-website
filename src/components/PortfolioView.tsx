@@ -80,7 +80,8 @@ export function PortfolioView() {
   const handleShare = async () => {
     if (!selectedItem) return;
     
-    const shareUrl = window.location.href;
+    // 使用分享落地页链接
+    const shareUrl = `${window.location.origin}/share/work/${selectedItem.id}`;
     const copied = await copyToClipboard(shareUrl);
 
     if (copied) {
@@ -146,6 +147,7 @@ export function PortfolioView() {
                     alt={item.title}
                     className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-105 opacity-60 group-hover:opacity-80"
                     src={item.img}
+                    loading="lazy"
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-[#0c0e14] via-[#0c0e14]/40 to-transparent" />
                   <div className={`absolute inset-0 opacity-0 group-hover:opacity-20 transition-opacity duration-700 ${item.bgGlow}`} />
@@ -237,6 +239,7 @@ export function PortfolioView() {
                     src={selectedItem.img} 
                     alt={selectedItem.title} 
                     className="w-full h-full object-cover flex-shrink-0" 
+                    loading="lazy"
                   />
                   {/* Additional images */}
                   {selectedItem.images.map((imgUrl, idx) => (
@@ -245,6 +248,7 @@ export function PortfolioView() {
                       src={imgUrl} 
                       alt={`${selectedItem.title} ${idx + 1}`} 
                       className="w-full h-full object-cover flex-shrink-0" 
+                      loading="lazy"
                     />
                   ))}
                 </div>

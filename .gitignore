@@ -6,3 +6,22 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# 数据库文件
+*.db
+*.sqlite
+*.sql
+
+# 部署包和压缩文件
+*.tar.gz
+*.zip
+
+# IDE配置
+.vscode/
+.idea/
+
+# 临时文件
+.trae/
+deploy-files/
+temp_*
+share.html

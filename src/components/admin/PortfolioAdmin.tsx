@@ -577,16 +577,25 @@ export function PortfolioAdmin() {
                       {imageUploadStatus.phase === 'done' && !imageUploadStatus.message.includes('失败') && (
                         <Check className="w-4 h-4 text-green-400 mt-0.5 flex-shrink-0" />
                       )}
-                      <div className={`text-sm whitespace-pre-line ${imageUploadStatus.message.includes('失败') ? 'text-red-400' : 'text-on-surface-variant'}`}>
-                        {imageUploadStatus.message}
+                      <div className="flex-1">
+                        <div className={`text-sm whitespace-pre-line ${imageUploadStatus.message.includes('失败') ? 'text-red-400' : 'text-on-surface-variant'}`}>
+                          {imageUploadStatus.message}
+                        </div>
+                        {imageUploadStatus.phase !== 'done' && imageUploadStatus.progress > 0 && (
+                          <div className="text-xs text-on-surface-variant/70 mt-1">
+                            进度：{imageUploadStatus.progress}%
+                          </div>
+                        )}
                       </div>
                     </div>
                     {imageUploadStatus.phase !== 'done' && (
-                      <div className="w-full bg-white/5 rounded-full h-2 overflow-hidden mt-2">
-                        <div 
-                          className="h-full rounded-full bg-secondary transition-all duration-300"
-                          style={{ width: `${imageUploadStatus.progress}%` }}
-                        />
+                      <div className="mt-3">
+                        <div className="w-full bg-white/5 rounded-full h-3 overflow-hidden">
+                          <div 
+                            className="h-full rounded-full bg-gradient-to-r from-primary to-secondary transition-all duration-300"
+                            style={{ width: `${imageUploadStatus.progress}%` }}
+                          />
+                        </div>
                       </div>
                     )}
                   </div>
@@ -692,18 +701,32 @@ export function PortfolioAdmin() {
                       {videoUploadStatus.progress === 100 && !videoUploadStatus.message.includes('失败') && (
                         <Check className="w-4 h-4 text-green-400 mt-0.5 flex-shrink-0" />
                       )}
-                      <div className={`text-sm whitespace-pre-line ${videoUploadStatus.message.includes('失败') ? 'text-red-400' : 'text-on-surface-variant'}`}>
-                        {videoUploadStatus.message}
+                      <div className="flex-1">
+                        <div className={`text-sm whitespace-pre-line ${videoUploadStatus.message.includes('失败') ? 'text-red-400' : 'text-on-surface-variant'}`}>
+                          {videoUploadStatus.message}
+                        </div>
+                        {(videoUploadStatus.phase !== 'done') && videoUploadStatus.progress > 0 && (
+                          <div className="text-xs text-on-surface-variant/70 mt-1">
+                            进度：{videoUploadStatus.progress}%
+                            {videoUploadStatus.phase === 'checking' && ' (检测比特率中...)'}
+                            {videoUploadStatus.phase === 'compressing' && ' (视频压缩中，请耐心等待...)'}
+                            {videoUploadStatus.phase === 'uploading' && ' (正在上传中...)'}
+                          </div>
+                        )}
                       </div>
                     </div>
                     {(videoUploadStatus.phase !== 'done') && (
-                      <div className="w-full bg-white/5 rounded-full h-2 overflow-hidden mt-2">
-                        <div 
-                          className={`h-full rounded-full transition-all duration-300 ${
-                            videoUploadStatus.phase === 'checking' || videoUploadStatus.phase === 'compressing' ? 'bg-primary' : 'bg-secondary'
-                          }`}
-                          style={{ width: `${videoUploadStatus.progress}%` }}
-                        />
+                      <div className="mt-3">
+                        <div className="w-full bg-white/5 rounded-full h-3 overflow-hidden">
+                          <div 
+                            className={`h-full rounded-full transition-all duration-300 ${
+                              videoUploadStatus.phase === 'checking' || videoUploadStatus.phase === 'compressing' 
+                                ? 'bg-gradient-to-r from-primary to-purple-400' 
+                                : 'bg-gradient-to-r from-secondary to-cyan-400'
+                            }`}
+                            style={{ width: `${videoUploadStatus.progress}%` }}
+                          />
+                        </div>
                       </div>
                     )}
                   </div>

@@ -185,6 +185,10 @@ export function HomeView() {
       } else if (id.startsWith('fw')) {
         const item = featuredItems.find(w => w.featuredId === id);
         if (item) setSelectedItem(item);
+      } else {
+        // 尝试在精选作品中查找普通 portfolio ID
+        const item = featuredItems.find(w => w.id.toString() === id);
+        if (item) setSelectedItem(item);
       }
     }
   }, [featuredItems]);
@@ -280,6 +284,7 @@ export function HomeView() {
                     className="w-full h-full object-cover"
                     alt={`Hero slide ${index + 1}`}
                     src={slide.img}
+                    loading={index === 0 ? "eager" : "lazy"}
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent z-10"></div>
                   <div className="absolute bottom-6 left-6 z-20 flex items-center gap-4">
@@ -372,6 +377,7 @@ export function HomeView() {
                       className="w-full h-full object-cover"
                       alt={item.name}
                       src={item.coverImage}
+                      loading="lazy"
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-surface-container-low via-transparent to-transparent"></div>
                     {item.icon && (
@@ -400,6 +406,7 @@ export function HomeView() {
                       className="w-full h-full object-cover"
                       alt={item.title}
                       src={item.img}
+                      loading="lazy"
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-surface-container-low via-transparent to-transparent"></div>
                   </div>
@@ -437,6 +444,7 @@ export function HomeView() {
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-1000"
                   alt={work.title}
                   src={work.img}
+                  loading="lazy"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-60 group-hover:opacity-100 transition-opacity" />
                 
@@ -483,8 +491,28 @@ export function HomeView() {
         {selectedItem && (
           <div className="flex flex-col h-full relative">
             <div className={`absolute top-0 left-0 w-full h-64 ${selectedItem.bgGlow || 'bg-primary/20'} blur-[80px] -z-10 opacity-50`}></div>
-            {/* Check if it's a portfolio item with multiple images */}
-            {!('coverImage' in selectedItem) && ('images' in selectedItem) && selectedItem.images && selectedItem.images.length > 0 ? (
+            {/* Check if it's a video */}
+            {!('coverImage' in selectedItem) && ('videoUrl' in selectedItem) && selectedItem.videoUrl ? (
+              <div className="relative aspect-video shrink-0 bg-black">
+                <video 
+                  src={selectedItem.videoUrl} 
+                  className="w-full h-full object-cover"
+                  autoPlay
+                  loop
+                  muted
+                  playsInline
+                  controls
+                />
+                {('type' in selectedItem) && selectedItem.type === 'video' && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/30 pointer-events-none">
+                    <div className="w-16 h-16 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center border border-white/30">
+                      <Play className="text-white w-8 h-8 ml-1" />
+                    </div>
+                  </div>
+                )}
+                <div className="absolute inset-0 bg-gradient-to-t from-surface-container-low via-surface-container-low/20 to-transparent pointer-events-none"></div>
+              </div>
+            ) : !('coverImage' in selectedItem) && ('images' in selectedItem) && selectedItem.images && selectedItem.images.length > 0 ? (
               <div className="relative aspect-video shrink-0 bg-black overflow-hidden group">
                 {/* Carousel with all images (cover + additional) */}
                 <div className="h-full flex transition-transform duration-500" style={{ transform: `translateX(-${(selectedItem as any).currentSlideIndex || 0}00%)` }}>
@@ -551,10 +579,31 @@ export function HomeView() {
                   alt={('name' in selectedItem ? selectedItem.name : selectedItem.title)} 
                   className="w-full h-full object-cover" 
                 />
+                {!('coverImage' in selectedItem) && ('type' in selectedItem) && selectedItem.type === 'video' && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                    <div className="w-16 h-16 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center border border-white/30">
+                      <Play className="text-white w-8 h-8 ml-1" />
+                    </div>
+                  </div>
+                )}
                 <div className="absolute inset-0 bg-gradient-to-t from-surface-container-low via-surface-container-low/20 to-transparent pointer-events-none"></div>
               </div>
             )}
             <div className="p-6 flex-1 flex flex-col -mt-8 relative z-10">
+              {!('coverImage' in selectedItem) && (
+                <div className="flex items-center gap-2 mb-4">
+                  {('category' in selectedItem) && (
+                    <span className={`px-2 py-0.5 rounded-sm bg-black/40 border border-white/10 text-[10px] font-label uppercase tracking-wider ${('color' in selectedItem) ? selectedItem.color : 'text-primary'}`}>
+                      {selectedItem.category}
+                    </span>
+                  )}
+                  {('tag' in selectedItem) && (
+                    <span className="px-2 py-0.5 rounded-sm bg-black/40 border border-white/10 text-white/70 text-[10px] font-label uppercase tracking-wider">
+                      {selectedItem.tag}
+                    </span>
+                  )}
+                </div>
+              )}
               <h3 className="text-2xl font-headline font-bold text-on-surface mb-6">{('name' in selectedItem ? selectedItem.name : selectedItem.title)}</h3>
               <div className="w-12 h-[1px] bg-white/20 mb-6"></div>
               <p className="text-on-surface-variant leading-relaxed font-body text-sm">

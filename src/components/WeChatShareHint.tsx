@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from 'motion/react';
-import { CornerRightUp, CheckCircle2 } from 'lucide-react';
+import { CornerRightUp, CheckCircle2, Info, Share2 } from 'lucide-react';
 import { useEffect } from 'react';
 
 interface ShareHintProps {
@@ -41,12 +41,27 @@ export function ShareHint({ isVisible, onClose, mode }: ShareHintProps) {
                   initial={{ scale: 0.9, opacity: 0 }}
                   animate={{ scale: 1, opacity: 1 }}
                   transition={{ delay: 0.3 }}
-                  className="bg-surface-container-high/90 backdrop-blur-md p-6 rounded-2xl border border-white/20 shadow-2xl max-w-[280px] text-center"
+                  className="bg-surface-container-high/90 backdrop-blur-md p-6 rounded-2xl border border-white/20 shadow-2xl max-w-[300px] text-center"
                 >
-                  <p className="font-headline text-lg font-bold mb-2">分享到朋友圈或好友</p>
-                  <p className="font-body text-sm opacity-80 leading-relaxed">
-                    该作品的网址已复制或点击右上角的 <span className="text-secondary font-bold">...</span> 按钮直接分享该作品
+                  <div className="flex items-center justify-center gap-2 mb-3">
+                    <Share2 className="w-6 h-6 text-secondary" />
+                    <p className="font-headline text-lg font-bold">分享给朋友</p>
+                  </div>
+                  <p className="font-body text-sm opacity-90 leading-relaxed mb-3">
+                    该作品的网址已复制到剪贴板
                   </p>
+                  <div className="bg-white/10 rounded-xl p-3 mb-3">
+                    <p className="text-xs opacity-80 mb-1">💡 分享技巧</p>
+                    <p className="font-body text-sm">
+                      点击右上角的 <span className="text-secondary font-bold">...</span> 按钮，选择「发送给朋友」或「分享到朋友圈」
+                    </p>
+                  </div>
+                  <div className="flex items-start gap-2 bg-primary/20 rounded-xl p-3 text-left">
+                    <Info className="w-4 h-4 text-primary shrink-0 mt-0.5" />
+                    <p className="text-xs opacity-80">
+                      微信分享卡片的效果依赖于微信抓取，建议实际发送给好友测试
+                    </p>
+                  </div>
                 </motion.div>
               </div>
               
