@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿import { useState, useEffect } from 'react';
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿import { useState, useEffect } from 'react';
 import { Plus, GripVertical, ChevronUp, ChevronDown, Edit2, Trash2, Image, AlertCircle, Upload, Link as LinkIcon, Save, X } from 'lucide-react';
 import { getCategoriesWithDetails, addCategoryWithDetails, updateCategoryDetails, deleteCategoryWithDetails, CategoryWithDetails } from '../../data/store';
 import { uploadImageToOSS } from '../../lib/ossUtils';
@@ -53,8 +53,16 @@ export function CategoriesAdmin() {
 
   const handleDelete = async (id: string) => {
     if (confirm('确定要删除这个分类吗？删除后相关案例将不受影响。')) {
-      deleteCategoryWithDetails(id);
-      refreshCategories();
+      setIsLoading(true);
+      try {
+        await deleteCategoryWithDetails(id);
+        await refreshCategories();
+      } catch (error) {
+        console.error('删除分类失败:', error);
+        alert('删除失败，请重试');
+      } finally {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -72,25 +80,33 @@ export function CategoriesAdmin() {
     setIsLoading(false);
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!formData.name.trim()) {
       alert('请输入分类名称');
       return;
     }
 
-    if (viewMode === 'create') {
-      addCategoryWithDetails(formData.name.trim(), formData.description, formData.coverImage, formData.icon);
-    } else if (viewMode === 'edit' && editingCategory) {
-      updateCategoryDetails(editingCategory.id, {
-        name: formData.name.trim(),
-        description: formData.description,
-        coverImage: formData.coverImage,
-        icon: formData.icon
-      });
-    }
+    setIsLoading(true);
+    try {
+      if (viewMode === 'create') {
+        await addCategoryWithDetails(formData.name.trim(), formData.description, formData.coverImage, formData.icon);
+      } else if (viewMode === 'edit' && editingCategory) {
+        await updateCategoryDetails(editingCategory.id, {
+          name: formData.name.trim(),
+          description: formData.description,
+          coverImage: formData.coverImage,
+          icon: formData.icon
+        });
+      }
 
-    setViewMode('list');
-    refreshCategories();
+      setViewMode('list');
+      await refreshCategories();
+    } catch (error) {
+      console.error('保存分类失败:', error);
+      alert('保存失败，请重试');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleDragStart = (e: React.DragEvent, id: string) => {

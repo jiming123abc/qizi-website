@@ -135,28 +135,6 @@ export async function deletePortfolioItem(id: number): Promise<void> {
   return apiDelete(`portfolio-items/${id}`, 'Failed to delete portfolio item');
 }
 
-// ================= Categories API =================
-
-export async function getCategories(): Promise<Category[]> {
-  return apiGet<Category[]>('categories', 'Failed to fetch categories');
-}
-
-export async function saveCategories(categories: Category[]): Promise<void> {
-  return saveItems('categories', categories);
-}
-
-export async function addCategory(name: string): Promise<Category> {
-  return apiPost<Category, { name: string }>('categories', { name }, 'Failed to add category');
-}
-
-export async function updateCategory(id: string, name: string): Promise<void> {
-  return apiPut(`categories/${id}`, { name }, 'Failed to update category');
-}
-
-export async function deleteCategory(id: string): Promise<void> {
-  return apiDelete(`categories/${id}`, 'Failed to delete category');
-}
-
 // ================= Featured Works API =================
 
 export async function getFeaturedWorks(): Promise<FeaturedWork[]> {

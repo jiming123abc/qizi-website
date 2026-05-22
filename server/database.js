@@ -62,19 +62,6 @@ function initDatabase() {
     });
 
     db.run(`
-      CREATE TABLE IF NOT EXISTS categories (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        description TEXT,
-        coverImage TEXT,
-        icon TEXT,
-        sortOrder INTEGER DEFAULT 0,
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-
-    db.run(`
       CREATE TABLE IF NOT EXISTS featured_works (
         id TEXT PRIMARY KEY,
         portfolioId INTEGER NOT NULL,
@@ -190,26 +177,7 @@ function insertInitialData() {
     }
   });
 
-  db.get('SELECT COUNT(*) as count FROM categories', (err, row) => {
-    if (err) {
-      console.error('Error checking categories:', err);
-      return;
-    }
-    if (row.count === 0) {
-      const initialCategories = [
-        { id: "all", name: "全部" },
-        { id: "ai-video", name: "AI影像创作" },
-        { id: "corporate", name: "视频定制" },
-        { id: "brand", name: "品牌设计" },
-        { id: "douyin", name: "短视频运营" }
-      ];
 
-      const insertStmt = db.prepare('INSERT INTO categories (id, name) VALUES (?, ?)');
-      initialCategories.forEach((cat) => insertStmt.run(cat.id, cat.name));
-      insertStmt.finalize();
-      console.log('Initial categories inserted');
-    }
-  });
 
   db.get('SELECT COUNT(*) as count FROM home_content', (err, row) => {
     if (err) {
@@ -413,35 +381,15 @@ const portfolioItems = {
     return { id, ...item };
   },
   delete: async (id) => {
+    // 先删除精选作品表中的相关记录
+    await dbAsync.run('DELETE FROM featured_works WHERE portfolioId=?', [id]);
+    // 再删除作品本身
     await dbAsync.run('DELETE FROM portfolio_items WHERE id=?', [id]);
     return true;
   }
 };
 
-const categories = {
-  getAll: async () => {
-    const rows = await dbAsync.all('SELECT * FROM categories ORDER BY sortOrder ASC, id ASC');
-    return rows;
-  },
-  create: async (category) => {
-    await dbAsync.run(
-      'INSERT INTO categories (id, name, description, coverImage, icon, sortOrder) VALUES (?, ?, ?, ?, ?, ?)',
-      [category.id, category.name, category.description, category.coverImage, category.icon, category.sortOrder]
-    );
-    return category;
-  },
-  update: async (id, category) => {
-    await dbAsync.run(
-      'UPDATE categories SET name=?, description=?, coverImage=?, icon=?, sortOrder=?, updatedAt=CURRENT_TIMESTAMP WHERE id=?',
-      [category.name, category.description, category.coverImage, category.icon, category.sortOrder, id]
-    );
-    return { id, ...category };
-  },
-  delete: async (id) => {
-    await dbAsync.run('DELETE FROM categories WHERE id=?', [id]);
-    return true;
-  }
-};
+
 
 const featuredWorks = {
   getAll: async () => {
@@ -554,6 +502,11 @@ const categoriesDetails = {
     return category;
   },
   update: async (id, category) => {
+    // 先获取旧的分类名称
+    const oldCategory = await dbAsync.get('SELECT name FROM categories_details WHERE id=?', [id]);
+    const oldName = oldCategory?.name;
+    
+    // 更新分类
     await dbAsync.run(
       'UPDATE categories_details SET name=?, description=?, coverImage=?, icon=?, sortOrder=?, tag=?, color=?, bgGlow=?, updatedAt=CURRENT_TIMESTAMP WHERE id=?',
       [
@@ -561,9 +514,28 @@ const categoriesDetails = {
         category.sortOrder, category.tag, category.color, category.bgGlow, id
       ]
     );
+    
+    // 如果分类名称改变了，同步更新所有相关作品的分类
+    if (oldName && oldName !== category.name) {
+      await dbAsync.run(
+        'UPDATE portfolio_items SET category=?, updatedAt=CURRENT_TIMESTAMP WHERE category=?',
+        [category.name, oldName]
+      );
+    }
+    
     return { id, ...category };
   },
   delete: async (id) => {
+    // 先获取要删除的分类的名称
+    const category = await dbAsync.get('SELECT name FROM categories_details WHERE id=?', [id]);
+    if (category) {
+      // 清空所有该分类的作品的 category 字段
+      await dbAsync.run(
+        'UPDATE portfolio_items SET category=?, updatedAt=CURRENT_TIMESTAMP WHERE category=?',
+        ['', category.name]
+      );
+    }
+    // 删除分类
     await dbAsync.run('DELETE FROM categories_details WHERE id=?', [id]);
     return true;
   }
@@ -571,7 +543,6 @@ const categoriesDetails = {
 
 module.exports = {
   portfolioItems,
-  categories,
   featuredWorks,
   homeContent,
   teamMembers,

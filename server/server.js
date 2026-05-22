@@ -756,16 +756,6 @@ app.delete('/api/portfolio-items/:id', async (req, res) => {
   }
 });
 
-app.get('/api/categories', async (req, res) => {
-  try {
-    const categories = await db.categories.getAll();
-    res.json(categories);
-  } catch (error) {
-    console.error('Get categories error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
 app.get('/api/categories-details', async (req, res) => {
   try {
     const categories = await db.categoriesDetails.getAll();
@@ -776,36 +766,39 @@ app.get('/api/categories-details', async (req, res) => {
   }
 });
 
-app.post('/api/categories', async (req, res) => {
+app.post('/api/categories-details', async (req, res) => {
   try {
-    const categories = await db.categories.getAll();
-    const maxId = Math.max(...categories.map(c => parseInt(c.id || '0')), 0);
+    const categories = await db.categoriesDetails.getAll();
     const maxSortOrder = Math.max(...categories.map(c => c.sortOrder || 0), 0);
-    const category = { ...req.body, id: (maxId + 1).toString(), sortOrder: maxSortOrder + 1 };
-    const newCategory = await db.categories.create(category);
+    const category = { 
+      ...req.body, 
+      id: req.body.id || `cat${Date.now()}`,
+      sortOrder: maxSortOrder + 1 
+    };
+    const newCategory = await db.categoriesDetails.create(category);
     res.json(newCategory);
   } catch (error) {
-    console.error('Create category error:', error);
+    console.error('Create category details error:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-app.put('/api/categories/:id', async (req, res) => {
+app.put('/api/categories-details/:id', async (req, res) => {
   try {
-    const updatedCategory = await db.categories.update(req.params.id, req.body);
+    const updatedCategory = await db.categoriesDetails.update(req.params.id, req.body);
     res.json(updatedCategory);
   } catch (error) {
-    console.error('Update category error:', error);
+    console.error('Update category details error:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-app.delete('/api/categories/:id', async (req, res) => {
+app.delete('/api/categories-details/:id', async (req, res) => {
   try {
-    await db.categories.delete(req.params.id);
+    await db.categoriesDetails.delete(req.params.id);
     res.status(204).end();
   } catch (error) {
-    console.error('Delete category error:', error);
+    console.error('Delete category details error:', error);
     res.status(500).json({ error: error.message });
   }
 });

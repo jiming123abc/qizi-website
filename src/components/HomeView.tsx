@@ -278,7 +278,7 @@ export function HomeView() {
         <div className="absolute top-0 right-0 w-96 h-96 bg-primary/10 blur-[120px] -z-10"></div>
         
         <div className="flex-1 space-y-6">
-          <h2 className="text-4xl md:text-6xl font-headline font-black tracking-tighter leading-[1.1]">
+          <h2 className="text-4xl md:text-6xl font-headline font-black tracking-tighter leading-[1.1] holographic-text">
             {homeContent.heroTitle || '开启未来的'}<br />
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary via-secondary to-tertiary">
               {homeContent.heroGradientTitle || '视界 Matrix'}

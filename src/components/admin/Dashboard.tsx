@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { FileImage, Video, Tag, TrendingUp, Download, RefreshCcw } from 'lucide-react';
 import { 
   getPortfolioItems, 
-  getCategories, 
   getCategoriesWithDetails, 
   getTeamMembers,
   getHomeContent 
@@ -23,7 +22,7 @@ export function Dashboard() {
       try {
         const [items, categories] = await Promise.all([
           getPortfolioItems(),
-          getCategories()
+          getCategoriesWithDetails()
         ]);
         setStats({
           portfolioCount: items.length,
