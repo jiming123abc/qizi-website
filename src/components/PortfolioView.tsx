@@ -15,6 +15,18 @@ export function PortfolioView() {
   const [defaultShareDescription, setDefaultShareDescription] = useState('诚信立足 创新致远');
   const [isWeChatHintVisible, setIsWeChatHintVisible] = useState(false);
 
+  const updateUrlForShare = (id: number) => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('id', id.toString());
+    window.history.replaceState({}, '', url.toString());
+  };
+
+  const restoreDefaultUrl = () => {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('id');
+    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+  };
+
   useEffect(() => {
     const loadData = async () => {
       try {
@@ -77,11 +89,23 @@ export function PortfolioView() {
     
     // 复制主应用链接带参数
     const shareUrl = `${window.location.origin}/?id=${selectedItem.id}`;
+    updateUrlForShare(selectedItem.id);
     const copied = await copyToClipboard(shareUrl);
 
     if (copied) {
       setIsWeChatHintVisible(true);
     }
+  };
+
+  const handleCloseShareHint = () => {
+    setIsWeChatHintVisible(false);
+    restoreDefaultUrl();
+  };
+
+  const handleCloseDetail = () => {
+    setSelectedItem(null);
+    setIsWeChatHintVisible(false);
+    restoreDefaultUrl();
   };
 
   const filteredItems = activeCategory === '全部作品' 
@@ -92,7 +116,7 @@ export function PortfolioView() {
     <div className="pt-20 pb-32 lg:pb-12">
       <ShareHint 
         isVisible={isWeChatHintVisible} 
-        onClose={() => setIsWeChatHintVisible(false)} 
+        onClose={handleCloseShareHint} 
         mode={isWeChat() ? 'wechat' : 'default'}
       />
       
@@ -202,7 +226,7 @@ export function PortfolioView() {
       {/* Portfolio Detail Modal */}
       <ItemDetailModal
         isOpen={!!selectedItem}
-        onClose={() => setSelectedItem(null)}
+        onClose={handleCloseDetail}
         item={selectedItem}
         onShare={handleShare}
       />

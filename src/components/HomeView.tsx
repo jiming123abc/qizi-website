@@ -115,6 +115,22 @@ export function HomeView() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const heroIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
+  const isPortfolioShareItem = (item: typeof selectedItem) => {
+    return !!item && 'id' in item && !('coverImage' in item) && Number.isFinite(Number(item.id));
+  };
+
+  const updateUrlForShare = (id: number | string) => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('id', id.toString());
+    window.history.replaceState({}, '', url.toString());
+  };
+
+  const restoreDefaultUrl = () => {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('id');
+    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+  };
+
   useEffect(() => {
     const loadData = async () => {
       try {
@@ -205,7 +221,7 @@ export function HomeView() {
       let shareUrl: string;
       
       // 判断是否是作品（有 portfolio ID），使用主应用链接带参数
-      if ('id' in selectedItem && !('coverImage' in selectedItem)) {
+      if (isPortfolioShareItem(selectedItem)) {
         // Portfolio item，使用主应用链接
         shareUrl = `${window.location.origin}/?id=${selectedItem.id}`;
         shareTitle = ('title' in selectedItem ? selectedItem.title : '大连柒子文化发展有限公司');
@@ -242,9 +258,10 @@ export function HomeView() {
     let shareUrl: string;
     
     // 判断是否是作品（有 portfolio ID），使用主应用链接带参数
-    if ('id' in selectedItem && !('coverImage' in selectedItem)) {
+    if (isPortfolioShareItem(selectedItem)) {
       // Portfolio item，使用主应用链接
       shareUrl = `${window.location.origin}/?id=${selectedItem.id}`;
+      updateUrlForShare(selectedItem.id);
     } else {
       // 核心业务或分类，使用首页
       shareUrl = window.location.origin;
@@ -255,6 +272,17 @@ export function HomeView() {
     if (copied) {
       setIsWeChatHintVisible(true);
     }
+  };
+
+  const handleCloseShareHint = () => {
+    setIsWeChatHintVisible(false);
+    restoreDefaultUrl();
+  };
+
+  const handleCloseDetail = () => {
+    setSelectedItem(null);
+    setIsWeChatHintVisible(false);
+    restoreDefaultUrl();
   };
 
   const scroll = (direction: 'left' | 'right') => {
@@ -271,7 +299,7 @@ export function HomeView() {
     <div className="pt-16 pb-24 lg:pb-12">
       <ShareHint 
         isVisible={isWeChatHintVisible} 
-        onClose={() => setIsWeChatHintVisible(false)} 
+        onClose={handleCloseShareHint} 
         mode={isWeChat() ? 'wechat' : 'default'}
       />
       {/* Hero Section */}
@@ -510,7 +538,7 @@ export function HomeView() {
       {/* Detail Modal */}
       <ItemDetailModal
         isOpen={!!selectedItem}
-        onClose={() => setSelectedItem(null)}
+        onClose={handleCloseDetail}
         item={selectedItem}
         onShare={handleShare}
       />

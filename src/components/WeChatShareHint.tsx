@@ -41,6 +41,7 @@ export function ShareHint({ isVisible, onClose, mode }: ShareHintProps) {
                   initial={{ scale: 0.9, opacity: 0 }}
                   animate={{ scale: 1, opacity: 1 }}
                   transition={{ delay: 0.3 }}
+                  onClick={(e) => e.stopPropagation()}
                   className="bg-surface-container-high/90 backdrop-blur-md p-6 rounded-2xl border border-white/20 shadow-2xl max-w-[300px] text-center"
                 >
                   <div className="flex items-center justify-center gap-2 mb-3">
@@ -69,6 +70,7 @@ export function ShareHint({ isVisible, onClose, mode }: ShareHintProps) {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={{ delay: 1 }}
+                onClick={onClose}
                 className="absolute bottom-12 left-1/2 -translate-x-1/2 px-8 py-3 rounded-full glass-panel border border-white/20 text-sm font-label tracking-widest uppercase hover:bg-white/10 transition-colors pointer-events-auto"
               >
                 我知道了
