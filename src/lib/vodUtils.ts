@@ -12,9 +12,9 @@ export interface VodUploadResult {
 
 export function generateVodConfig(): VodConfig {
   return {
-    accessKeyId: process.env.REACT_APP_VOD_ACCESS_KEY_ID || '',
-    accessKeySecret: process.env.REACT_APP_VOD_ACCESS_KEY_SECRET || '',
-    region: process.env.REACT_APP_VOD_REGION || 'cn-beijing'
+    accessKeyId: import.meta.env.VITE_VOD_ACCESS_KEY_ID || import.meta.env.REACT_APP_VOD_ACCESS_KEY_ID || '',
+    accessKeySecret: import.meta.env.VITE_VOD_ACCESS_KEY_SECRET || import.meta.env.REACT_APP_VOD_ACCESS_KEY_SECRET || '',
+    region: import.meta.env.VITE_VOD_REGION || import.meta.env.REACT_APP_VOD_REGION || 'cn-beijing'
   };
 }
 

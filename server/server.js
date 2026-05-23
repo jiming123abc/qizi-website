@@ -816,9 +816,14 @@ app.get('/api/featured-works', async (req, res) => {
 app.post('/api/featured-works', async (req, res) => {
   try {
     const { portfolioId } = req.body;
-    const fw = { id: `fw${Date.now()}`, portfolioId: portfolioId, sortOrder: 0 };
-    const result = await db.featuredWorks.create(fw);
-    res.json(result);
+    const existingWorks = await db.featuredWorks.getAll();
+    const maxSortOrder = existingWorks.length > 0 ? Math.max(...existingWorks.map(w => w.sortOrder || 0)) : 0;
+    const fw = { id: `fw${Date.now()}`, portfolioId: Number(portfolioId), sortOrder: maxSortOrder + 1 };
+    
+    await db.featuredWorks.create(fw);
+    
+    const allWorks = await db.featuredWorks.getAll();
+    res.json(allWorks);
   } catch (error) {
     console.error('Add featured work error:', error);
     res.status(500).json({ error: error.message });

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Play, ChevronLeft, ChevronRight } from 'lucide-react';
-import { Modal } from './Modal';
+import { ChevronLeft, ChevronRight, Play } from 'lucide-react';
+import { ItemDetailModal } from './ItemDetailModal';
 import { isWeChat, copyToClipboard, setupShareMetadata } from '../lib/shareUtils';
 import { ShareHint } from './WeChatShareHint';
 import { getPortfolioItems, getCategoriesWithDetails, getHomeContent, PortfolioItem } from '../data/store';
@@ -200,124 +200,12 @@ export function PortfolioView() {
       </footer>
 
       {/* Portfolio Detail Modal */}
-      <Modal isOpen={!!selectedItem} onClose={() => setSelectedItem(null)} onShare={handleShare}>
-        {selectedItem && (
-          <div className="flex flex-col h-full relative">
-            <div className={`absolute top-0 left-0 w-full h-64 ${selectedItem.bgGlow} blur-[80px] -z-10 opacity-50`}></div>
-            {/* Check if it's a video or an image with multiple images */}
-            {selectedItem.videoUrl ? (
-              <div className="relative aspect-video shrink-0 bg-black">
-                <video 
-                  src={selectedItem.videoUrl} 
-                  className="w-full h-full object-cover"
-                  autoPlay
-                  loop
-                  muted
-                  playsInline
-                  controls
-                />
-                {selectedItem.type === 'video' && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-black/30 pointer-events-none">
-                    <div className="w-16 h-16 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center border border-white/30">
-                      <Play className="text-white w-8 h-8 ml-1" />
-                    </div>
-                  </div>
-                )}
-                <div className="absolute inset-0 bg-gradient-to-t from-surface-container-low via-surface-container-low/20 to-transparent pointer-events-none"></div>
-              </div>
-            ) : selectedItem.images && selectedItem.images.length > 0 ? (
-              /* Carousel with all images (cover + additional) */
-              <div className="relative aspect-video shrink-0 bg-black overflow-hidden group">
-                <div className="h-full flex transition-transform duration-500" style={{ transform: `translateX(-${(selectedItem as any).currentSlideIndex || 0}00%)` }}>
-                  {/* Cover image first */}
-                  <img 
-                    src={selectedItem.img} 
-                    alt={selectedItem.title} 
-                    className="w-full h-full object-cover flex-shrink-0" 
-                    loading="lazy"
-                  />
-                  {/* Additional images */}
-                  {selectedItem.images.map((imgUrl, idx) => (
-                    <img 
-                      key={idx}
-                      src={imgUrl} 
-                      alt={`${selectedItem.title} ${idx + 1}`} 
-                      className="w-full h-full object-cover flex-shrink-0" 
-                      loading="lazy"
-                    />
-                  ))}
-                </div>
-                {/* Navigation arrows */}
-                <button 
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    const total = 1 + (selectedItem.images?.length || 0);
-                    setSelectedItem({
-                      ...selectedItem,
-                      currentSlideIndex: Math.max(0, ((selectedItem as any).currentSlideIndex || 0) - 1)
-                    });
-                  }}
-                  className="absolute left-4 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/40 backdrop-blur-md border border-white/10 text-white/70 hover:text-white hover:bg-black/60 transition-all opacity-0 group-hover:opacity-100"
-                >
-                  <ChevronLeft className="w-6 h-6" />
-                </button>
-                <button 
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    const total = 1 + (selectedItem.images?.length || 0);
-                    setSelectedItem({
-                      ...selectedItem,
-                      currentSlideIndex: Math.min(total - 1, ((selectedItem as any).currentSlideIndex || 0) + 1)
-                    });
-                  }}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/40 backdrop-blur-md border border-white/10 text-white/70 hover:text-white hover:bg-black/60 transition-all opacity-0 group-hover:opacity-100"
-                >
-                  <ChevronRight className="w-6 h-6" />
-                </button>
-                {/* Indicators */}
-                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2">
-                  <span className={`w-2 h-2 rounded-full transition-all ${((selectedItem as any).currentSlideIndex || 0) === 0 ? 'bg-white w-4' : 'bg-white/50'}`}></span>
-                  {(selectedItem.images || []).map((_, idx) => (
-                    <span 
-                      key={idx} 
-                      className={`w-2 h-2 rounded-full transition-all ${((selectedItem as any).currentSlideIndex || 0) === idx + 1 ? 'bg-white w-4' : 'bg-white/50'}`}
-                    ></span>
-                  ))}
-                </div>
-                <div className="absolute inset-0 bg-gradient-to-t from-surface-container-low via-surface-container-low/20 to-transparent pointer-events-none"></div>
-              </div>
-            ) : (
-              /* Single image */
-              <div className="relative aspect-video shrink-0 bg-black">
-                <img src={selectedItem.img} alt={selectedItem.title} className="w-full h-full object-cover" />
-                {selectedItem.type === 'video' && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-black/30">
-                    <div className="w-16 h-16 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center border border-white/30">
-                      <Play className="text-white w-8 h-8 ml-1" />
-                    </div>
-                  </div>
-                )}
-                <div className="absolute inset-0 bg-gradient-to-t from-surface-container-low via-surface-container-low/20 to-transparent pointer-events-none"></div>
-              </div>
-            )}
-            <div className="p-6 flex-1 flex flex-col -mt-8 relative z-10">
-              <div className="flex items-center gap-2 mb-4">
-                <span className={`px-2 py-0.5 rounded-sm bg-black/40 border border-white/10 text-[10px] font-label uppercase tracking-wider ${selectedItem.color}`}>
-                  {selectedItem.category}
-                </span>
-                <span className="px-2 py-0.5 rounded-sm bg-black/40 border border-white/10 text-white/70 text-[10px] font-label uppercase tracking-wider">
-                  {selectedItem.tag}
-                </span>
-              </div>
-              <h3 className="text-2xl font-headline font-bold text-on-surface mb-6">{selectedItem.title}</h3>
-              <div className="w-12 h-[1px] bg-white/20 mb-6"></div>
-              <p className="text-on-surface-variant leading-relaxed font-body text-sm">
-                {selectedItem.fullDesc}
-              </p>
-            </div>
-          </div>
-        )}
-      </Modal>
+      <ItemDetailModal
+        isOpen={!!selectedItem}
+        onClose={() => setSelectedItem(null)}
+        item={selectedItem}
+        onShare={handleShare}
+      />
     </div>
   );
 }

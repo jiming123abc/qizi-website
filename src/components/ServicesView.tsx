@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { MessageSquare, Bot, Code2, Clapperboard, ImagePlay, AudioLines } from 'lucide-react';
-import { Modal } from './Modal';
+import { ItemDetailModal } from './ItemDetailModal';
 import { getCategoriesWithDetails, CategoryWithDetails } from '../data/store';
 
 const techStack = [
@@ -144,29 +144,12 @@ export function ServicesView() {
         </p>
       </footer>
 
-      {/* Detail Modal - 与首页一致 */}
-      <Modal isOpen={!!selectedItem} onClose={() => setSelectedItem(null)}>
-        {selectedItem && (
-          <div className="flex flex-col h-full relative">
-            <div className={`absolute top-0 left-0 w-full h-64 ${selectedItem.bgGlow || 'bg-primary/20'} blur-[80px] -z-10 opacity-50`}></div>
-            <div className="relative aspect-video shrink-0 bg-black">
-              <img 
-                src={selectedItem.coverImage} 
-                alt={selectedItem.name} 
-                className="w-full h-full object-cover" 
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-surface-container-low via-surface-container-low/20 to-transparent pointer-events-none"></div>
-            </div>
-            <div className="p-6 flex-1 flex flex-col -mt-8 relative z-10">
-              <h3 className="text-2xl font-headline font-bold text-on-surface mb-6">{selectedItem.name}</h3>
-              <div className="w-12 h-[1px] bg-white/20 mb-6"></div>
-              <p className="text-on-surface-variant leading-relaxed font-body text-sm">
-                {selectedItem.description}
-              </p>
-            </div>
-          </div>
-        )}
-      </Modal>
+      {/* Detail Modal */}
+      <ItemDetailModal
+        isOpen={!!selectedItem}
+        onClose={() => setSelectedItem(null)}
+        item={selectedItem}
+      />
     </div>
   );
 }

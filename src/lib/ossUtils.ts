@@ -41,15 +41,15 @@ function formatFileSize(bytes: number): string {
 
 export function generateOSSConfig(): OSSConfig {
   return {
-    accessKeyId: process.env.REACT_APP_OSS_ACCESS_KEY_ID || '',
-    accessKeySecret: process.env.REACT_APP_OSS_ACCESS_KEY_SECRET || '',
-    bucket: process.env.REACT_APP_OSS_BUCKET || '',
-    region: process.env.REACT_APP_OSS_REGION || 'oss-cn-beijing',
-    endpoint: process.env.REACT_APP_OSS_ENDPOINT || ''
+    accessKeyId: import.meta.env.VITE_OSS_ACCESS_KEY_ID || import.meta.env.REACT_APP_OSS_ACCESS_KEY_ID || '',
+    accessKeySecret: import.meta.env.VITE_OSS_ACCESS_KEY_SECRET || import.meta.env.REACT_APP_OSS_ACCESS_KEY_SECRET || '',
+    bucket: import.meta.env.VITE_OSS_BUCKET || import.meta.env.REACT_APP_OSS_BUCKET || '',
+    region: import.meta.env.VITE_OSS_REGION || import.meta.env.REACT_APP_OSS_REGION || 'oss-cn-beijing',
+    endpoint: import.meta.env.VITE_OSS_ENDPOINT || import.meta.env.REACT_APP_OSS_ENDPOINT || ''
   };
 }
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+const API_BASE_URL = import.meta.env.VITE_API_URL || import.meta.env.REACT_APP_API_URL || 'http://localhost:5000';
 
 export async function uploadFileToOSS(
   file: File,

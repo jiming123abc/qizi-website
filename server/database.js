@@ -397,6 +397,15 @@ const featuredWorks = {
     return rows;
   },
   create: async (work) => {
+    // 先检查是否已存在
+    const existing = await dbAsync.get(
+      'SELECT * FROM featured_works WHERE portfolioId=?',
+      [work.portfolioId]
+    );
+    if (existing) {
+      // 已存在，直接返回现有数据
+      return existing;
+    }
     await dbAsync.run(
       'INSERT INTO featured_works (id, portfolioId, sortOrder) VALUES (?, ?, ?)',
       [work.id, work.portfolioId, work.sortOrder]

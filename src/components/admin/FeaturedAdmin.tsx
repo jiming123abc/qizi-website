@@ -52,20 +52,30 @@ export function FeaturedAdmin() {
     return portfolioItems.filter(item => !featuredIds.includes(item.id));
   };
 
-  const handleAddFeatured = (portfolioId: number) => {
-    addFeaturedWork(portfolioId);
-    refreshData();
-    setShowAddModal(false);
-  };
-
-  const handleRemoveFeatured = (featuredId: string) => {
-    if (confirm('确定要从精选中移除这个作品吗？')) {
-      removeFeaturedWork(featuredId);
-      refreshData();
+  const handleAddFeatured = async (portfolioId: number) => {
+    try {
+      await addFeaturedWork(portfolioId);
+      await refreshData();
+      setShowAddModal(false);
+    } catch (error) {
+      console.error('添加精选失败:', error);
+      alert('添加失败，请重试');
     }
   };
 
-  const handleMoveUp = (featuredId: string) => {
+  const handleRemoveFeatured = async (featuredId: string) => {
+    if (confirm('确定要从精选中移除这个作品吗？')) {
+      try {
+        await removeFeaturedWork(featuredId);
+        await refreshData();
+      } catch (error) {
+        console.error('移除精选失败:', error);
+        alert('移除失败，请重试');
+      }
+    }
+  };
+
+  const handleMoveUp = async (featuredId: string) => {
     const works = [...featuredWorks];
     const index = works.findIndex(w => w.id === featuredId);
     if (index > 0) {
@@ -75,12 +85,17 @@ export function FeaturedAdmin() {
       works.forEach((w, i) => {
         w.sortOrder = i + 1;
       });
-      saveFeaturedWorks(works);
-      setFeaturedWorks(works);
+      try {
+        await saveFeaturedWorks(works);
+        setFeaturedWorks(works);
+      } catch (error) {
+        console.error('排序失败:', error);
+        alert('排序失败，请重试');
+      }
     }
   };
 
-  const handleMoveDown = (featuredId: string) => {
+  const handleMoveDown = async (featuredId: string) => {
     const works = [...featuredWorks];
     const index = works.findIndex(w => w.id === featuredId);
     if (index < works.length - 1) {
@@ -90,8 +105,13 @@ export function FeaturedAdmin() {
       works.forEach((w, i) => {
         w.sortOrder = i + 1;
       });
-      saveFeaturedWorks(works);
-      setFeaturedWorks(works);
+      try {
+        await saveFeaturedWorks(works);
+        setFeaturedWorks(works);
+      } catch (error) {
+        console.error('排序失败:', error);
+        alert('排序失败，请重试');
+      }
     }
   };
 
@@ -105,7 +125,7 @@ export function FeaturedAdmin() {
     setDragOverIndex(index);
   };
 
-  const handleDrop = (e: React.DragEvent, targetIndex: number) => {
+  const handleDrop = async (e: React.DragEvent, targetIndex: number) => {
     e.preventDefault();
     if (!draggedItem) return;
 
@@ -118,8 +138,13 @@ export function FeaturedAdmin() {
       works.forEach((w, i) => {
         w.sortOrder = i + 1;
       });
-      saveFeaturedWorks(works);
-      setFeaturedWorks(works);
+      try {
+        await saveFeaturedWorks(works);
+        setFeaturedWorks(works);
+      } catch (error) {
+        console.error('排序失败:', error);
+        alert('排序失败，请重试');
+      }
     }
 
     setDraggedItem(null);
