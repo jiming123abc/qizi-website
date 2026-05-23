@@ -71,6 +71,14 @@ export default function App() {
     loadHomeContent();
   }, [activeTab]);
 
+  // 标签页切换时自动滚动回顶部
+  useEffect(() => {
+    window.scrollTo({
+      top: 0,
+      behavior: 'smooth'
+    });
+  }, [activeTab]);
+
   const handleSearch = (query: string) => {
     setSearchQuery(query);
     setActiveTab('search');

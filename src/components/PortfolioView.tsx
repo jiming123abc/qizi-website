@@ -40,7 +40,7 @@ export function PortfolioView() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const id = params.get('id');
-    if (id) {
+    if (id && items.length > 0) {
       const item = items.find(p => p.id.toString() === id);
       if (item) {
         setSelectedItem(item);
@@ -53,7 +53,7 @@ export function PortfolioView() {
   useEffect(() => {
     if (selectedItem) {
       // When opening detail, set share info for the item
-      const shareUrl = `${window.location.origin}/share/work/${selectedItem.id}`;
+      const shareUrl = `${window.location.origin}/?id=${selectedItem.id}`;
       
       setupShareMetadata({
         title: selectedItem.title,
@@ -66,7 +66,7 @@ export function PortfolioView() {
       setupShareMetadata({
         title: defaultShareTitle,
         desc: defaultShareDescription,
-        link: window.location.href,
+        link: window.location.origin,
         imgUrl: defaultImage
       });
     }
@@ -75,8 +75,8 @@ export function PortfolioView() {
   const handleShare = async () => {
     if (!selectedItem) return;
     
-    // 复制分享落地页链接
-    const shareUrl = `${window.location.origin}/share/work/${selectedItem.id}`;
+    // 复制主应用链接带参数
+    const shareUrl = `${window.location.origin}/?id=${selectedItem.id}`;
     const copied = await copyToClipboard(shareUrl);
 
     if (copied) {

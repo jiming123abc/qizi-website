@@ -19,15 +19,6 @@ try {
   console.error('读取 index.html 失败:', err);
 }
 
-// 读取 share.html 模板
-const shareHtmlPath = path.join(__dirname, '../share.html');
-let shareHtmlTemplate = '';
-try {
-  shareHtmlTemplate = fs.readFileSync(shareHtmlPath, 'utf-8');
-} catch (err) {
-  console.error('读取 share.html 失败:', err);
-}
-
 // 确保本地存储目录存在
 const uploadDir = path.join(__dirname, '../public/uploads');
 if (!fs.existsSync(uploadDir)) {
@@ -958,66 +949,6 @@ app.post('/api/data/import', async (req, res) => {
   } catch (error) {
     console.error('数据导入失败:', error);
     res.status(500).json({ success: false, message: '数据导入失败' });
-  }
-});
-
-// 分享落地页动态渲染
-app.get('/share/work/:id', async (req, res) => {
-  try {
-    const workId = req.params.id;
-    let html = shareHtmlTemplate;
-    
-    try {
-      // 获取作品集数据
-      const items = await db.portfolioItems.getAll();
-      const item = items.find(i => i.id.toString() === workId.toString());
-      
-      if (item) {
-        // 获取首页默认内容作为 fallback
-        let homeContent = null;
-        try {
-          homeContent = await db.homeContent.get();
-        } catch (e) {
-          console.warn('获取首页内容失败:', e);
-        }
-        
-        const title = item.title || (homeContent?.shareTitle || '大连柒子文化发展有限公司');
-        const description = item.shortDesc || item.fullDesc || item.category || (homeContent?.shareDescription || '诚信立足 创新致远');
-        const image = item.img || (homeContent?.heroImage || '/images/hero-home.png');
-        const url = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
-        
-        // 替换 meta 标签
-        html = html
-          .replace(/<meta property="og:title" content="[^"]*" \/>/, `<meta property="og:title" content="${escapeHtml(title)}" />`)
-          .replace(/<meta property="og:description" content="[^"]*" \/>/, `<meta property="og:description" content="${escapeHtml(description)}" />`)
-          .replace(/<meta property="og:image" content="[^"]*" \/>/, `<meta property="og:image" content="${getFullImageUrl(image, req)}" />`)
-          .replace(/<meta property="og:url" content="[^"]*" \/>/, `<meta property="og:url" content="${escapeHtml(url)}" />`)
-          .replace(/<meta name="description" content="[^"]*" \/>/, `<meta name="description" content="${escapeHtml(description)}" />`)
-          .replace(/<meta name="wechat:title" content="[^"]*" \/>/, `<meta name="wechat:title" content="${escapeHtml(title)}" />`)
-          .replace(/<meta name="wechat:description" content="[^"]*" \/>/, `<meta name="wechat:description" content="${escapeHtml(description)}" />`)
-          .replace(/<meta name="wechat:image" content="[^"]*" \/>/, `<meta name="wechat:image" content="${getFullImageUrl(image, req)}" />`)
-          .replace(/<meta name="twitter:title" content="[^"]*" \/>/, `<meta name="twitter:title" content="${escapeHtml(title)}" />`)
-          .replace(/<meta name="twitter:description" content="[^"]*" \/>/, `<meta name="twitter:description" content="${escapeHtml(description)}" />`)
-          .replace(/<meta name="twitter:image" content="[^"]*" \/>/, `<meta name="twitter:image" content="${getFullImageUrl(image, req)}" />`)
-          .replace(/<title>[^<]*<\/title>/, `<title>${escapeHtml(title)}</title>`)
-          // 替换页面上显示的内容
-          .replace(/<img src="[^"]*" alt="作品预览" id="workImage" \/>/, `<img src="${getFullImageUrl(image, req)}" alt="作品预览" id="workImage" />`)
-          .replace(/<h1 class="work-title" id="workTitle">[^<]*<\/h1>/, `<h1 class="work-title" id="workTitle">${escapeHtml(title)}</h1>`)
-          .replace(/<p class="work-desc" id="workDesc">[^<]*<\/p>/, `<p class="work-desc" id="workDesc">${escapeHtml(description)}</p>`);
-        
-        console.log(`为作品 ID ${workId} 渲染了分享落地页`);
-      } else {
-        // 作品不存在，跳转到首页
-        console.log(`作品 ID ${workId} 不存在`);
-      }
-    } catch (itemErr) {
-      console.warn('获取作品信息失败，使用默认 meta 标签:', itemErr);
-    }
-    
-    res.send(html);
-  } catch (error) {
-    console.error('渲染 share.html 失败:', error);
-    res.send(shareHtmlTemplate);
   }
 });
 

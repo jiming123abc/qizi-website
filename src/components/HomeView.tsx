@@ -204,10 +204,10 @@ export function HomeView() {
       let shareImg: string;
       let shareUrl: string;
       
-      // 判断是否是作品（有 portfolio ID），使用分享落地页
+      // 判断是否是作品（有 portfolio ID），使用主应用链接带参数
       if ('id' in selectedItem && !('coverImage' in selectedItem)) {
-        // Portfolio item，使用分享落地页
-        shareUrl = `${window.location.origin}/share/work/${selectedItem.id}`;
+        // Portfolio item，使用主应用链接
+        shareUrl = `${window.location.origin}/?id=${selectedItem.id}`;
         shareTitle = ('title' in selectedItem ? selectedItem.title : '大连柒子文化发展有限公司');
         shareDesc = ('shortDesc' in selectedItem ? selectedItem.shortDesc : selectedItem.category) || '诚信立足 创新致远';
         shareImg = ('img' in selectedItem ? selectedItem.img : homeContent.heroImage || '/images/hero-home.png');
@@ -230,7 +230,7 @@ export function HomeView() {
       setupShareMetadata({
         title: homeContent.shareTitle || '大连柒子文化发展有限公司',
         desc: homeContent.shareDescription || '诚信立足 创新致远',
-        link: window.location.href,
+        link: window.location.origin,
         imgUrl: homeContent.heroImage || '/images/hero-home.png'
       });
     }
@@ -241,10 +241,10 @@ export function HomeView() {
     
     let shareUrl: string;
     
-    // 判断是否是作品（有 portfolio ID），使用分享落地页
+    // 判断是否是作品（有 portfolio ID），使用主应用链接带参数
     if ('id' in selectedItem && !('coverImage' in selectedItem)) {
-      // Portfolio item，使用分享落地页
-      shareUrl = `${window.location.origin}/share/work/${selectedItem.id}`;
+      // Portfolio item，使用主应用链接
+      shareUrl = `${window.location.origin}/?id=${selectedItem.id}`;
     } else {
       // 核心业务或分类，使用首页
       shareUrl = window.location.origin;
