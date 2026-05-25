@@ -70,6 +70,7 @@ app.use(express.json());
 
 app.use('/images', express.static(path.join(__dirname, '../public/images')));
 app.use('/uploads', express.static(path.join(__dirname, '../public/uploads')));
+app.use('/ffmpeg', express.static(path.join(__dirname, '../public/ffmpeg')));
 // 托管前端静态文件
 app.use(express.static(path.join(__dirname, '../dist')));
 
