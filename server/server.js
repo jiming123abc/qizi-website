@@ -452,10 +452,12 @@ app.post('/api/upload/image', upload.single('file'), async (req, res) => {
       return res.status(400).json({ error: `图片大小不能超过 ${maxSizeMB}MB` });
     }
 
-    let fileBuffer = req.file.buffer;
+    const fileName = req.file.filename;
+    const filePath = req.file.path;
     const originalSizeKB = (req.file.size / 1024).toFixed(2);
     let compressed = false;
     let compressedSizeKB = originalSizeKB;
+    let fileBuffer = fs.readFileSync(filePath);
     
     // 如果图片大于 300KB，自动压缩
     if (req.file.size > 300 * 1024) {
@@ -464,9 +466,6 @@ app.post('/api/upload/image', upload.single('file'), async (req, res) => {
       compressed = true;
       console.log(`图片已压缩: ${originalSizeKB}KB -> ${compressedSizeKB}KB`);
     }
-
-    const fileName = req.file.filename;
-    const filePath = req.file.path;
 
     let fileUrl = '';
     
