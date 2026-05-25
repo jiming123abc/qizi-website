@@ -72,12 +72,12 @@ async function loadFFmpeg(onProgress?: CompressionProgressCallback): Promise<boo
       }
     }, 500);
 
-    // 设置加载超时（60秒）
+    // 设置加载超时（3分钟 - 考虑到30MB文件需要较长时间）
     let loadTimedOut = false;
     timeoutId = setTimeout(() => {
       loadTimedOut = true;
       clearInterval(progressInterval);
-    }, 60000);
+    }, 180000);
 
     // 优先从本地服务器加载，备用 CDN
     const sources = [
@@ -92,13 +92,15 @@ async function loadFFmpeg(onProgress?: CompressionProgressCallback): Promise<boo
       
       try {
         console.log(`尝试加载 FFmpeg: ${baseURL}`);
+        onProgress?.('loading', 10);
         await Promise.race([
           ffmpegInstance.load({
             coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
             wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
           }),
+          // 单个源的超时时间设置为90秒（考虑到30MB的wasm文件）
           new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Load timeout')), 30000)
+            setTimeout(() => reject(new Error('Load timeout')), 90000)
           )
         ]);
         loadSuccess = true;
