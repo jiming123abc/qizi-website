@@ -318,10 +318,10 @@ async function compressVideo(inputBuffer, maxBitrateKbps = 2000, onProgress) {
           `-b:v ${maxBitrateKbps}k`,
           `-maxrate ${maxBitrateKbps + 500}k`,
           `-bufsize ${maxBitrateKbps * 2}k`,
-          '-preset veryfast',
+          '-preset ultrafast',
           '-c:v libx264',
           '-c:a aac',
-          '-crf 26',
+          '-crf 28',
           '-movflags +faststart'
         ])
         .on('progress', (progress) => {
