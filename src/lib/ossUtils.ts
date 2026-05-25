@@ -4,6 +4,25 @@ const FILE_SIZE_LIMITS = {
   video: 1024 * 1024 * 1024 // 视频：1GB
 };
 
+// 视频压缩结果类型
+export type VideoCompressionError = {
+  success: false;
+  error: 'webassembly-not-supported' | 'ffmpeg-load-failed' | 'compression-failed' | 'bitrate-detection-failed';
+  message: string;
+  originalFile: File;
+};
+
+export type VideoUploadResult = {
+  success: true;
+  url: string;
+  compressed: boolean;
+  originalSizeKB: number;
+  compressedSizeKB?: number;
+} | {
+  success: false;
+  compressionError: VideoCompressionError;
+};
+
 // 文件类型白名单
 const ALLOWED_MIME_TYPES = {
   image: ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif'],
@@ -214,7 +233,7 @@ export async function uploadVideo(
   file: File,
   onProgress?: (progress: UploadProgress) => void,
   forceLocal: boolean = false
-): Promise<{ url: string; coverUrl: string }> {
+): Promise<VideoUploadResult> {
   // 验证文件类型
   if (!validateFileType(file, 'video')) {
     throw new Error('不支持的视频格式，请上传 MP4、WebM、OGG 或 MOV 格式');
@@ -227,19 +246,50 @@ export async function uploadVideo(
     throw new Error(`视频大小不能超过 ${sizeValidation.maxSizeMB}MB，当前文件大小: ${fileSizeMB}MB`);
   }
 
-  const isMP4 = file.type === 'video/mp4';
+  const originalSizeKB = file.size / 1024;
   const fileSizeMB = (file.size / 1024 / 1024).toFixed(2);
 
   // 显示初始状态
-  if (isMP4) {
-    onProgress?.({ phase: 'checking', progress: 0, message: `正在处理视频 (${fileSizeMB}MB)...` });
-  } else {
-    onProgress?.({ phase: 'uploading', progress: 0, message: `正在上传视频 (${fileSizeMB}MB)...` });
+  onProgress?.({ phase: 'checking', progress: 0, message: `正在检查视频 (${fileSizeMB}MB)...` });
+
+  // 动态导入视频压缩模块
+  const { compressVideoIfNeeded } = await import('./videoCompressor');
+
+  // 尝试压缩视频
+  const compressionResult = await compressVideoIfNeeded(file, (stage, progress) => {
+    if (stage === 'loading') {
+      onProgress?.({ 
+        phase: 'compressing', 
+        progress, 
+        message: `正在加载视频处理组件... ${progress.toFixed(0)}%` 
+      });
+    } else if (stage === 'compressing') {
+      onProgress?.({ 
+        phase: 'compressing', 
+        progress, 
+        message: `正在压缩视频... ${progress.toFixed(0)}%` 
+      });
+    }
+  });
+
+  // 如果压缩失败，返回错误信息
+  if (!compressionResult.success) {
+    return {
+      success: false,
+      compressionError: compressionResult,
+    };
   }
 
-  return new Promise((resolve, reject) => {
+  // 准备上传的文件
+  const fileToUpload = compressionResult.file;
+  const isCompressed = compressionResult.compressedSizeKB !== compressionResult.originalSizeKB;
+
+  // 开始上传
+  onProgress?.({ phase: 'uploading', progress: 0, message: `正在上传视频...` });
+
+  const uploadUrl = await new Promise<string>((resolve, reject) => {
     const formData = new FormData();
-    formData.append('file', file);
+    formData.append('file', fileToUpload);
 
     const url = new URL(`${API_BASE_URL}/api/upload/video`);
     if (forceLocal) {
@@ -249,23 +299,17 @@ export async function uploadVideo(
     const xhr = new XMLHttpRequest();
     xhr.open('POST', url.toString());
 
-    // 设置超时时间（30分钟）
-    xhr.timeout = 1800000;
-
-    // 文件大小超过50MB时显示警告
-    if (file.size > 50 * 1024 * 1024) {
-      console.warn('上传文件较大，可能需要较长时间');
-    }
+    // 设置超时时间（10分钟，足够上传）
+    xhr.timeout = 600000;
 
     // 上传进度
     xhr.upload.addEventListener('progress', (event) => {
       if (event.loaded && event.total) {
         const percentage = Math.round((event.loaded / event.total) * 100);
-        const phase: UploadProgress['phase'] = isMP4 ? 'compressing' : 'uploading';
         onProgress?.({ 
-          phase, 
+          phase: 'uploading', 
           progress: percentage, 
-          message: isMP4 ? `视频处理中... ${percentage}%` : `视频上传中... ${percentage}%`
+          message: `视频上传中... ${percentage}%`
         });
       }
     });
@@ -274,23 +318,7 @@ export async function uploadVideo(
       if (xhr.status >= 200 && xhr.status < 300) {
         try {
           const result = JSON.parse(xhr.responseText);
-          
-          let message = '';
-          const originalSizeMB = (result.originalSize / 1024 / 1024).toFixed(2);
-          const compressedSizeMB = (result.compressedSize / 1024 / 1024).toFixed(2);
-          
-          if (result.compressed) {
-            message = `视频压缩完成\n比特率: ${result.originalBitrate}kbps -> ${result.targetBitrate}kbps\n大小: ${originalSizeMB}MB -> ${compressedSizeMB}MB\n用时: ${result.processingTime}秒`;
-          } else if (isMP4 && result.originalBitrate !== null) {
-            message = `视频上传完成\n比特率: ${result.originalBitrate}kbps（无需压缩）\n大小: ${originalSizeMB}MB\n用时: ${result.processingTime}秒`;
-          } else if (isMP4 && result.originalBitrate === null) {
-            message = `视频上传完成\n无法检测比特率（未压缩）\n大小: ${originalSizeMB}MB\n用时: ${result.processingTime}秒`;
-          } else {
-            message = `视频上传完成\n非MP4格式（无需压缩）\n大小: ${originalSizeMB}MB\n用时: ${result.processingTime}秒`;
-          }
-          
-          onProgress?.({ phase: 'uploading', progress: 100, message });
-          resolve({ url: result.url, coverUrl: '' });
+          resolve(result.url);
         } catch (error) {
           reject(new Error('解析响应失败'));
         }
@@ -316,4 +344,24 @@ export async function uploadVideo(
 
     xhr.send(formData);
   });
+
+  // 上传完成的消息
+  let message = '';
+  if (isCompressed) {
+    const originalSizeMB = (compressionResult.originalSizeKB / 1024).toFixed(2);
+    const compressedSizeMB = (compressionResult.compressedSizeKB / 1024).toFixed(2);
+    message = `视频上传完成\n大小: ${originalSizeMB}MB -> ${compressedSizeMB}MB`;
+  } else {
+    const sizeMB = (compressionResult.originalSizeKB / 1024).toFixed(2);
+    message = `视频上传完成\n大小: ${sizeMB}MB（无需压缩）`;
+  }
+  onProgress?.({ phase: 'uploading', progress: 100, message });
+
+  return {
+    success: true,
+    url: uploadUrl,
+    compressed: isCompressed,
+    originalSizeKB: compressionResult.originalSizeKB,
+    compressedSizeKB: compressionResult.compressedSizeKB,
+  };
 }

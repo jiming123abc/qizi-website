@@ -501,17 +501,6 @@ const uploadProgressStore = new Map();
 
 // 视频上传接口（支持SSE实时进度）
 app.post('/api/upload/video', upload.single('file'), async (req, res) => {
-  const startTime = Date.now();
-  const uploadId = req.headers['x-upload-id'] || Math.random().toString(36).substr(2, 9);
-  
-  // 初始化进度存储
-  uploadProgressStore.set(uploadId, {
-    stage: 'uploading',
-    compressProgress: 0,
-    ossProgress: 0,
-    message: '正在接收文件...'
-  });
-
   try {
     if (!req.file) {
       return res.status(400).json({ error: '请上传文件' });
@@ -520,100 +509,10 @@ app.post('/api/upload/video', upload.single('file'), async (req, res) => {
     // 验证文件大小
     if (!validateFileSize(req.file.size, 'video')) {
       const maxSizeMB = FILE_SIZE_LIMITS.video / (1024 * 1024);
-      uploadProgressStore.delete(uploadId);
       return res.status(400).json({ error: `视频大小不能超过 ${maxSizeMB}MB` });
     }
 
-    let fileBuffer = req.file.buffer;
-    let compressed = false;
-    let originalBitrate = null;
-    let targetBitrate = 2000;
-    const originalSize = req.file.size;
-
-    // 更新状态：文件接收完成
-    uploadProgressStore.set(uploadId, {
-      stage: 'processing',
-      compressProgress: 0,
-      ossProgress: 0,
-      message: '文件接收完成，正在检测比特率...'
-    });
-
-    // 只有MP4格式才检测和压缩
-    if (req.file.mimetype === 'video/mp4') {
-      try {
-        originalBitrate = await getVideoBitrate(fileBuffer);
-        console.log(`视频原始比特率: ${originalBitrate} kbps`);
-
-        // 只有当比特率大于2000kbps时才进行压缩
-        if (originalBitrate !== null && originalBitrate > targetBitrate) {
-          console.log(`比特率 ${originalBitrate} kbps > ${targetBitrate} kbps，开始压缩...`);
-          
-          uploadProgressStore.set(uploadId, {
-            stage: 'compressing',
-            compressProgress: 0,
-            ossProgress: 0,
-            message: `视频压缩中... 0%`
-          });
-          
-          // 创建进度回调
-          const onProgress = (progressInfo) => {
-            const percent = progressInfo.progress;
-            uploadProgressStore.set(uploadId, {
-              stage: 'compressing',
-              compressProgress: percent,
-              ossProgress: 0,
-              message: `视频压缩中... ${percent}%`
-            });
-          };
-          
-          fileBuffer = await compressVideo(fileBuffer, targetBitrate, onProgress);
-          compressed = true;
-          console.log(`视频压缩完成，目标比特率: ${targetBitrate} kbps`);
-          
-          uploadProgressStore.set(uploadId, {
-            stage: 'compressing',
-            compressProgress: 100,
-            ossProgress: 0,
-            message: '视频压缩完成'
-          });
-        } else if (originalBitrate === null) {
-          console.log('无法获取视频比特率，跳过压缩');
-          uploadProgressStore.set(uploadId, {
-            stage: 'processing',
-            compressProgress: 100,
-            ossProgress: 0,
-            message: '无法检测比特率，跳过压缩'
-          });
-        } else {
-          console.log(`比特率 ${originalBitrate} kbps <= ${targetBitrate} kbps，无需压缩`);
-          uploadProgressStore.set(uploadId, {
-            stage: 'processing',
-            compressProgress: 100,
-            ossProgress: 0,
-            message: `比特率 ${originalBitrate}kbps，无需压缩`
-          });
-        }
-      } catch (ffmpegError) {
-        console.warn('视频处理失败，使用原始文件:', ffmpegError.message);
-      }
-    } else {
-      console.log('非MP4格式，跳过压缩');
-      uploadProgressStore.set(uploadId, {
-        stage: 'processing',
-        compressProgress: 100,
-        ossProgress: 0,
-        message: '非MP4格式，无需压缩'
-      });
-    }
-
-    // 保存文件
-    uploadProgressStore.set(uploadId, {
-      stage: 'uploading',
-      compressProgress: compressed ? 100 : 0,
-      ossProgress: 0,
-      message: '正在保存文件... 0%'
-    });
-
+    const fileBuffer = req.file.buffer;
     const timestamp = Date.now();
     const extension = req.file.originalname.split('.').pop();
     const randomStr = Math.random().toString(36).substr(2, 9);
@@ -629,22 +528,11 @@ app.post('/api/upload/video', upload.single('file'), async (req, res) => {
       // 使用 OSS 上传
       try {
         const ossFileName = `videos/${fileName}`;
-        const result = await ossClient.put(ossFileName, fileBuffer, {
-          progress: (percentage) => {
-            const percent = Math.round(percentage * 100);
-            uploadProgressStore.set(uploadId, {
-              stage: 'uploading',
-              compressProgress: compressed ? 100 : 0,
-              ossProgress: percent,
-              message: `正在上传到阿里云 OSS... ${percent}%`
-            });
-          }
-        });
+        const result = await ossClient.put(ossFileName, fileBuffer);
         fileUrl = result.url;
         console.log('使用 OSS 上传视频成功');
       } catch (ossError) {
         console.warn('OSS 上传失败:', ossError.message);
-        uploadProgressStore.delete(uploadId);
         // 返回 OSS 失败错误，让前端询问用户是否使用本地存储
         return res.status(500).json({ 
           error: 'OSS 上传失败', 
@@ -658,35 +546,9 @@ app.post('/api/upload/video', upload.single('file'), async (req, res) => {
       fileUrl = `/uploads/videos/${fileName}`;
       console.log('使用本地存储视频');
     }
-    
-    const endTime = Date.now();
-    const processingTime = Math.round((endTime - startTime) / 1000);
-    const compressedSize = fileBuffer.length;
 
-    // 更新完成状态
-    uploadProgressStore.set(uploadId, {
-      stage: 'done',
-      compressProgress: compressed ? 100 : 0,
-      ossProgress: 100,
-      message: '上传完成'
-    });
-
-    // 清理进度存储（延迟清理）
-    setTimeout(() => {
-      uploadProgressStore.delete(uploadId);
-    }, 30000);
-
-    res.json({ 
-      url: fileUrl,
-      compressed: compressed,
-      originalBitrate: originalBitrate,
-      targetBitrate: compressed ? targetBitrate : null,
-      originalSize: originalSize,
-      compressedSize: compressedSize,
-      processingTime: processingTime
-    });
+    res.json({ url: fileUrl });
   } catch (error) {
-    uploadProgressStore.delete(uploadId);
     console.error('上传失败:', error);
     res.status(500).json({ error: '上传失败: ' + error.message });
   }

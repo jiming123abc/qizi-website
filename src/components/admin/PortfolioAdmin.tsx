@@ -25,7 +25,7 @@ import {
   getCategoriesWithDetails,
   PortfolioItem 
 } from '../../data/store';
-import { uploadImage, uploadVideo, UploadError } from '../../lib/ossUtils';
+import { uploadImage, uploadVideo, UploadError, VideoCompressionError } from '../../lib/ossUtils';
 import { validateVodUrl } from '../../lib/vodUtils';
 
 type ViewMode = 'list' | 'create' | 'edit';
@@ -65,6 +65,10 @@ export function PortfolioAdmin() {
     progress: number;
     message: string;
   }>({ phase: 'idle', progress: 0, message: '' });
+  const [showCompressionErrorDialog, setShowCompressionErrorDialog] = useState(false);
+  const [pendingCompressionError, setPendingCompressionError] = useState<VideoCompressionError | null>(null);
+  const [pendingVideoFile, setPendingVideoFile] = useState<File | null>(null);
+  const [pendingForceLocal, setPendingForceLocal] = useState(false);
 
   const [formData, setFormData] = useState({
     title: '',
@@ -262,39 +266,34 @@ export function PortfolioAdmin() {
 
   const handleVideoUpload = async (file: File, forceLocal: boolean = false) => {
     setIsLoading(true);
-    const isMP4 = file.type === 'video/mp4';
-    const fileSizeKB = (file.size / 1024).toFixed(1);
     const fileSizeMB = (file.size / 1024 / 1024).toFixed(2);
 
-    if (isMP4) {
-      setVideoUploadStatus({ 
-        phase: 'checking', 
-        progress: 0, 
-        message: `正在检测视频比特率 (${fileSizeKB}KB)...` 
-      });
-    } else {
-      setVideoUploadStatus({ 
-        phase: 'uploading', 
-        progress: 0, 
-        message: `视频无需压缩，直接上传 (${fileSizeMB}MB)...` 
-      });
-    }
+    setVideoUploadStatus({ 
+      phase: 'checking', 
+      progress: 0, 
+      message: `正在处理视频 (${fileSizeMB}MB)...` 
+    });
 
     try {
       const result = await uploadVideo(file, (progress) => {
         setVideoUploadStatus({ ...progress, phase: progress.phase as any });
       }, forceLocal);
       
-      setFormData(prev => ({ ...prev, videoUrl: result.url }));
-      if (!formData.img && result.coverUrl) {
-        setFormData(prev => ({ ...prev, img: result.coverUrl }));
+      if (result.success) {
+        setFormData(prev => ({ ...prev, videoUrl: result.url }));
+        
+        setVideoUploadStatus(prev => ({ 
+          ...prev,
+          phase: 'done', 
+          progress: 100 
+        }));
+      } else {
+        setPendingCompressionError(result.compressionError);
+        setPendingVideoFile(file);
+        setPendingForceLocal(forceLocal);
+        setShowCompressionErrorDialog(true);
+        setVideoUploadStatus({ phase: 'idle', progress: 0, message: '' });
       }
-      
-      setVideoUploadStatus(prev => ({ 
-        ...prev,
-        phase: 'done', 
-        progress: 100 
-      }));
     } catch (error) {
       const uploadError = error as UploadError;
       if (uploadError.ossError) {
@@ -314,6 +313,76 @@ export function PortfolioAdmin() {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleUploadOriginalVideo = async () => {
+    if (!pendingVideoFile) return;
+    
+    setShowCompressionErrorDialog(false);
+    await uploadVideoWithoutCompression(pendingVideoFile, pendingForceLocal);
+    
+    setPendingCompressionError(null);
+    setPendingVideoFile(null);
+    setPendingForceLocal(false);
+  };
+
+  const uploadVideoWithoutCompression = async (file: File, forceLocal: boolean = false) => {
+    setIsLoading(true);
+    const fileSizeMB = (file.size / 1024 / 1024).toFixed(2);
+
+    setVideoUploadStatus({ 
+      phase: 'uploading', 
+      progress: 0, 
+      message: `正在上传原视频 (${fileSizeMB}MB)...` 
+    });
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const API_BASE_URL = import.meta.env.VITE_API_URL || import.meta.env.REACT_APP_API_URL || 'http://localhost:5000';
+    const url = new URL(`${API_BASE_URL}/api/upload/video`);
+    if (forceLocal) {
+      url.searchParams.set('forceLocal', 'true');
+    }
+
+    try {
+      const response = await fetch(url.toString(), {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || error.error || '上传失败');
+      }
+
+      const result = await response.json();
+      setFormData(prev => ({ ...prev, videoUrl: result.url }));
+      
+      setVideoUploadStatus(prev => ({ 
+        ...prev,
+        phase: 'done', 
+        progress: 100,
+        message: '视频上传成功' 
+      }));
+    } catch (error) {
+      setVideoUploadStatus({ 
+        phase: 'done', 
+        progress: 0, 
+        message: `上传失败: ${(error as Error).message}` 
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleCancelAndManualUpload = () => {
+    setShowCompressionErrorDialog(false);
+    setPendingCompressionError(null);
+    setPendingVideoFile(null);
+    setPendingForceLocal(false);
+    setVideoSourceType('url');
+    alert('请手动将视频上传至阿里云 OSS，然后在视频 URL 输入框粘贴地址');
   };
 
   const handleAdditionalImageUpload = async (file: File, forceLocal: boolean = false) => {
@@ -393,6 +462,40 @@ export function PortfolioAdmin() {
   if (viewMode !== 'list') {
     return (
       <div className="p-8">
+        {/* Compression Error Dialog */}
+        {showCompressionErrorDialog && (
+          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+            <div className="bg-surface-container rounded-2xl border border-white/10 p-6 max-w-md w-full">
+              <div className="flex items-start gap-3 mb-4">
+                <AlertCircle className="w-6 h-6 text-red-400 flex-shrink-0" />
+                <div>
+                  <h3 className="font-headline text-lg font-bold text-on-surface">视频处理遇到问题</h3>
+                  <p className="text-sm text-on-surface-variant mt-1">
+                    {pendingCompressionError?.message}
+                  </p>
+                </div>
+              </div>
+              <div className="space-y-3">
+                <button
+                  onClick={handleUploadOriginalVideo}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-primary text-on-primary hover:bg-primary/90 transition-colors"
+                >
+                  直接上传原视频（文件较大）
+                </button>
+                <button
+                  onClick={handleCancelAndManualUpload}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-surface-container-low border border-white/10 text-on-surface-variant hover:text-on-surface transition-colors"
+                >
+                  取消，我自己上传到 OSS
+                </button>
+              </div>
+              <p className="text-xs text-on-surface-variant/70 mt-4">
+                提示：您可手动将视频上传至阿里云 OSS，然后在视频 URL 输入框粘贴地址。
+              </p>
+            </div>
+          </div>
+        )}
+
         <header className="flex items-center justify-between mb-8">
           <div>
             <h2 className="font-headline text-2xl font-bold text-on-surface">
