@@ -79,8 +79,9 @@ async function loadFFmpeg(onProgress?: CompressionProgressCallback): Promise<boo
       clearInterval(progressInterval);
     }, 180000);
 
-    // 优先从本地服务器加载，备用 CDN
+    // 加载顺序：国内CDN > 服务器 > 国外CDN
     const sources = [
+      'https://unpkg.byted.org/npm/@ffmpeg/core@0.12.6/dist/umd',
       '/ffmpeg',
       'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd',
       'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd',
