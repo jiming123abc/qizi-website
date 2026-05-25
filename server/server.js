@@ -102,8 +102,23 @@ function validateFileSize(size, type) {
   return size <= FILE_SIZE_LIMITS[type];
 }
 
-// 配置 multer 存储
-const storage = multer.memoryStorage();
+// 配置 multer 存储 - 使用磁盘存储处理大文件
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const isImage = file.mimetype.startsWith('image/');
+    const uploadPath = isImage 
+      ? path.join(uploadDir, 'images') 
+      : path.join(uploadDir, 'videos');
+    cb(null, uploadPath);
+  },
+  filename: (req, file, cb) => {
+    const timestamp = Date.now();
+    const extension = file.originalname.split('.').pop();
+    const randomStr = Math.random().toString(36).substr(2, 9);
+    const fileName = `${timestamp}-${randomStr}.${extension}`;
+    cb(null, fileName);
+  }
+});
 
 // 文件过滤器
 const fileFilter = (req, file, cb) => {
@@ -438,23 +453,20 @@ app.post('/api/upload/image', upload.single('file'), async (req, res) => {
     }
 
     let fileBuffer = req.file.buffer;
-    const originalSizeKB = (fileBuffer.length / 1024).toFixed(2);
+    const originalSizeKB = (req.file.size / 1024).toFixed(2);
     let compressed = false;
     let compressedSizeKB = originalSizeKB;
     
     // 如果图片大于 300KB，自动压缩
-    if (fileBuffer.length > 300 * 1024) {
+    if (req.file.size > 300 * 1024) {
       fileBuffer = await compressImage(fileBuffer, 300);
       compressedSizeKB = (fileBuffer.length / 1024).toFixed(2);
       compressed = true;
       console.log(`图片已压缩: ${originalSizeKB}KB -> ${compressedSizeKB}KB`);
     }
 
-    const timestamp = Date.now();
-    const extension = req.file.originalname.split('.').pop();
-    const randomStr = Math.random().toString(36).substr(2, 9);
-    const fileName = `${timestamp}-${randomStr}.${extension}`;
-    const filePath = path.join(uploadDir, 'images', fileName);
+    const fileName = req.file.filename;
+    const filePath = req.file.path;
 
     let fileUrl = '';
     
@@ -467,10 +479,18 @@ app.post('/api/upload/image', upload.single('file'), async (req, res) => {
         const ossFileName = `images/${fileName}`;
         const result = await ossClient.put(ossFileName, fileBuffer);
         fileUrl = result.url;
+        // 上传成功后删除本地临时文件
+        fs.unlinkSync(filePath);
         console.log('使用 OSS 上传成功');
       } catch (ossError) {
         console.warn('OSS 上传失败:', ossError.message);
         // 返回 OSS 失败错误，让前端询问用户是否使用本地存储
+        // 删除已保存的临时文件
+        try {
+          fs.unlinkSync(filePath);
+        } catch (e) {
+          console.warn('删除临时文件失败:', e.message);
+        }
         return res.status(500).json({ 
           error: 'OSS 上传失败', 
           ossError: true,
@@ -478,8 +498,10 @@ app.post('/api/upload/image', upload.single('file'), async (req, res) => {
         });
       }
     } else {
-      // 使用本地存储
-      fs.writeFileSync(filePath, fileBuffer);
+      // 使用本地存储 - 如果压缩了，需要覆盖原文件
+      if (compressed) {
+        fs.writeFileSync(filePath, fileBuffer);
+      }
       fileUrl = `/uploads/images/${fileName}`;
       console.log('使用本地存储');
     }
@@ -492,6 +514,14 @@ app.post('/api/upload/image', upload.single('file'), async (req, res) => {
     });
   } catch (error) {
     console.error('上传失败:', error);
+    // 清理已保存的文件
+    if (req.file && req.file.path) {
+      try {
+        fs.unlinkSync(req.file.path);
+      } catch (e) {
+        console.warn('清理临时文件失败:', e.message);
+      }
+    }
     res.status(500).json({ error: '上传失败: ' + error.message });
   }
 });
@@ -499,7 +529,7 @@ app.post('/api/upload/image', upload.single('file'), async (req, res) => {
 // 使用内存存储上传进度（生产环境可以使用Redis）
 const uploadProgressStore = new Map();
 
-// 视频上传接口（支持SSE实时进度）
+// 视频上传接口
 app.post('/api/upload/video', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
@@ -512,12 +542,8 @@ app.post('/api/upload/video', upload.single('file'), async (req, res) => {
       return res.status(400).json({ error: `视频大小不能超过 ${maxSizeMB}MB` });
     }
 
-    const fileBuffer = req.file.buffer;
-    const timestamp = Date.now();
-    const extension = req.file.originalname.split('.').pop();
-    const randomStr = Math.random().toString(36).substr(2, 9);
-    const fileName = `${timestamp}-${randomStr}.${extension}`;
-    const filePath = path.join(uploadDir, 'videos', fileName);
+    const fileName = req.file.filename;
+    const filePath = req.file.path;
 
     let fileUrl = '';
     
@@ -528,12 +554,20 @@ app.post('/api/upload/video', upload.single('file'), async (req, res) => {
       // 使用 OSS 上传
       try {
         const ossFileName = `videos/${fileName}`;
-        const result = await ossClient.put(ossFileName, fileBuffer);
+        const result = await ossClient.put(ossFileName, filePath);
         fileUrl = result.url;
+        // 上传成功后删除本地临时文件
+        fs.unlinkSync(filePath);
         console.log('使用 OSS 上传视频成功');
       } catch (ossError) {
         console.warn('OSS 上传失败:', ossError.message);
         // 返回 OSS 失败错误，让前端询问用户是否使用本地存储
+        // 删除已保存的临时文件
+        try {
+          fs.unlinkSync(filePath);
+        } catch (e) {
+          console.warn('删除临时文件失败:', e.message);
+        }
         return res.status(500).json({ 
           error: 'OSS 上传失败', 
           ossError: true,
@@ -541,8 +575,7 @@ app.post('/api/upload/video', upload.single('file'), async (req, res) => {
         });
       }
     } else {
-      // 使用本地存储
-      fs.writeFileSync(filePath, fileBuffer);
+      // 使用本地存储 - 文件已经在磁盘上了
       fileUrl = `/uploads/videos/${fileName}`;
       console.log('使用本地存储视频');
     }
@@ -550,6 +583,14 @@ app.post('/api/upload/video', upload.single('file'), async (req, res) => {
     res.json({ url: fileUrl });
   } catch (error) {
     console.error('上传失败:', error);
+    // 清理已保存的文件
+    if (req.file && req.file.path) {
+      try {
+        fs.unlinkSync(req.file.path);
+      } catch (e) {
+        console.warn('清理临时文件失败:', e.message);
+      }
+    }
     res.status(500).json({ error: '上传失败: ' + error.message });
   }
 });

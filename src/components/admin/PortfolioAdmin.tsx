@@ -382,7 +382,11 @@ export function PortfolioAdmin() {
     setPendingVideoFile(null);
     setPendingForceLocal(false);
     setVideoSourceType('url');
-    alert('请手动将视频上传至阿里云 OSS，然后在视频 URL 输入框粘贴地址');
+    setVideoUploadStatus({ 
+      phase: 'done', 
+      progress: 0, 
+      message: '您可手动压缩后再尝试上传，如果仍然失败，将压缩后的视频上传至阿里云 OSS，然后在视频 URL 输入框粘贴地址即可。' 
+    });
   };
 
   const handleAdditionalImageUpload = async (file: File, forceLocal: boolean = false) => {
@@ -490,7 +494,7 @@ export function PortfolioAdmin() {
                 </button>
               </div>
               <p className="text-xs text-on-surface-variant/70 mt-4">
-                提示：您可手动将视频上传至阿里云 OSS，然后在视频 URL 输入框粘贴地址。
+                提示：您可手动压缩后再尝试上传，如果仍然失败，将压缩后的视频上传至阿里云 OSS，然后在视频 URL 输入框粘贴地址即可。
               </p>
             </div>
           </div>

@@ -6,6 +6,8 @@ export type CompressionResult = {
   file: File;
   originalSizeKB: number;
   compressedSizeKB: number;
+  originalBitrate?: number;
+  duration?: number;
 } | {
   success: false;
   error: 'webassembly-not-supported' | 'ffmpeg-load-failed' | 'compression-failed' | 'bitrate-detection-failed';
@@ -44,6 +46,8 @@ async function loadFFmpeg(onProgress?: CompressionProgressCallback): Promise<boo
     return false;
   }
 
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  
   try {
     onProgress?.('loading', 0);
     ffmpegInstance = new FFmpeg();
@@ -57,16 +61,70 @@ async function loadFFmpeg(onProgress?: CompressionProgressCallback): Promise<boo
       onProgress?.('compressing', progress * 100);
     });
 
-    const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
-    await ffmpegInstance.load({
-      coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
-      wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
-    });
+    // 模拟加载进度
+    let progress = 0;
+    const progressInterval = setInterval(() => {
+      progress += Math.random() * 5;
+      if (progress > 90) {
+        clearInterval(progressInterval);
+      } else {
+        onProgress?.('loading', progress);
+      }
+    }, 500);
+
+    // 设置加载超时（60秒）
+    let loadTimedOut = false;
+    timeoutId = setTimeout(() => {
+      loadTimedOut = true;
+      clearInterval(progressInterval);
+    }, 60000);
+
+    // 优先从本地服务器加载，备用 CDN
+    const sources = [
+      '/ffmpeg',
+      'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd',
+      'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd',
+    ];
+
+    let loadSuccess = false;
+    for (const baseURL of sources) {
+      if (loadTimedOut) break;
+      
+      try {
+        console.log(`尝试加载 FFmpeg: ${baseURL}`);
+        await Promise.race([
+          ffmpegInstance.load({
+            coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
+            wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
+          }),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Load timeout')), 30000)
+          )
+        ]);
+        loadSuccess = true;
+        break;
+      } catch (sourceError) {
+        console.warn(`从 ${baseURL} 加载失败:`, sourceError);
+        continue;
+      }
+    }
+
+    clearInterval(progressInterval);
+    if (timeoutId) clearTimeout(timeoutId);
+
+    if (loadTimedOut) {
+      throw new Error('FFmpeg 加载超时');
+    }
+
+    if (!loadSuccess) {
+      throw new Error('所有 CDN 源加载失败');
+    }
 
     ffmpegLoaded = true;
     onProgress?.('loading', 100);
     return true;
   } catch (error) {
+    if (timeoutId) clearTimeout(timeoutId);
     console.error('Failed to load FFmpeg:', error);
     ffmpegInstance = null;
     ffmpegLoaded = false;
@@ -75,7 +133,7 @@ async function loadFFmpeg(onProgress?: CompressionProgressCallback): Promise<boo
 }
 
 // 通过视频元素估算码率（替代 FFprobe）
-async function estimateVideoBitrate(file: File): Promise<number | null> {
+async function estimateVideoBitrate(file: File): Promise<{ bitrate: number | null; duration: number | null }> {
   return new Promise((resolve) => {
     const video = document.createElement('video');
     video.preload = 'metadata';
@@ -90,15 +148,15 @@ async function estimateVideoBitrate(file: File): Promise<number | null> {
         const fileSizeBits = file.size * 8;
         const durationSeconds = duration;
         const bitrateKbps = Math.round(fileSizeBits / durationSeconds / 1000);
-        resolve(bitrateKbps);
+        resolve({ bitrate: bitrateKbps, duration: durationSeconds });
       } else {
-        resolve(null);
+        resolve({ bitrate: null, duration: null });
       }
     };
     
     video.onerror = () => {
       URL.revokeObjectURL(url);
-      resolve(null);
+      resolve({ bitrate: null, duration: null });
     };
     
     video.src = url;
@@ -122,10 +180,13 @@ export async function compressVideoIfNeeded(
     };
   }
 
-  // 估算视频码率
+  // 估算视频码率和时长
   let bitrateKbps: number | null = null;
+  let duration: number | null = null;
   try {
-    bitrateKbps = await estimateVideoBitrate(file);
+    const result = await estimateVideoBitrate(file);
+    bitrateKbps = result.bitrate;
+    duration = result.duration;
   } catch (e) {
     // 继续执行
   }
@@ -137,6 +198,8 @@ export async function compressVideoIfNeeded(
       file,
       originalSizeKB,
       compressedSizeKB: originalSizeKB,
+      originalBitrate: bitrateKbps || undefined,
+      duration: duration || undefined,
     };
   }
 
@@ -201,6 +264,8 @@ export async function compressVideoIfNeeded(
       file: compressedFile,
       originalSizeKB,
       compressedSizeKB,
+      originalBitrate: bitrateKbps,
+      duration,
     };
   } catch (error) {
     console.error('视频压缩失败:', error);

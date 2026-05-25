@@ -4,6 +4,14 @@ const FILE_SIZE_LIMITS = {
   video: 1024 * 1024 * 1024 // 视频：1GB
 };
 
+const TARGET_BITRATE_KBPS = 2500;
+
+function formatDuration(seconds: number): string {
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+
 // 视频压缩结果类型
 export type VideoCompressionError = {
   success: false;
@@ -18,6 +26,8 @@ export type VideoUploadResult = {
   compressed: boolean;
   originalSizeKB: number;
   compressedSizeKB?: number;
+  originalBitrate?: number;
+  duration?: number;
 } | {
   success: false;
   compressionError: VideoCompressionError;
@@ -139,6 +149,7 @@ export interface UploadResult {
   compressedSizeKB?: number;
   originalBitrate?: number;
   targetBitrate?: number;
+  duration?: number;
 }
 
 export interface UploadError extends Error {
@@ -283,6 +294,8 @@ export async function uploadVideo(
   // 准备上传的文件
   const fileToUpload = compressionResult.file;
   const isCompressed = compressionResult.compressedSizeKB !== compressionResult.originalSizeKB;
+  const originalBitrate = compressionResult.originalBitrate;
+  const duration = compressionResult.duration;
 
   // 开始上传
   onProgress?.({ phase: 'uploading', progress: 0, message: `正在上传视频...` });
@@ -350,10 +363,12 @@ export async function uploadVideo(
   if (isCompressed) {
     const originalSizeMB = (compressionResult.originalSizeKB / 1024).toFixed(2);
     const compressedSizeMB = (compressionResult.compressedSizeKB / 1024).toFixed(2);
-    message = `视频上传完成\n大小: ${originalSizeMB}MB -> ${compressedSizeMB}MB`;
+    message = `视频上传完成\n大小: ${originalSizeMB}MB -> ${compressedSizeMB}MB\n码率: ${originalBitrate || '未知'}kbps -> ${TARGET_BITRATE_KBPS}kbps`;
   } else {
     const sizeMB = (compressionResult.originalSizeKB / 1024).toFixed(2);
-    message = `视频上传完成\n大小: ${sizeMB}MB（无需压缩）`;
+    const bitrateInfo = originalBitrate ? `\n码率: ${originalBitrate}kbps` : '';
+    const durationInfo = duration ? `\n时长: ${formatDuration(duration)}` : '';
+    message = `视频上传完成\n大小: ${sizeMB}MB（无需压缩）${bitrateInfo}${durationInfo}`;
   }
   onProgress?.({ phase: 'uploading', progress: 100, message });
 
@@ -363,5 +378,7 @@ export async function uploadVideo(
     compressed: isCompressed,
     originalSizeKB: compressionResult.originalSizeKB,
     compressedSizeKB: compressionResult.compressedSizeKB,
+    originalBitrate,
+    duration,
   };
 }
