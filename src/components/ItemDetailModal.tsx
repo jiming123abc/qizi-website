@@ -239,6 +239,12 @@ export function ItemDetailModal({ isOpen, onClose, item, onShare }: ItemDetailMo
             {description}
           </p>
         </div>
+
+        {showShare && (
+          <p className="px-6 pb-4 -mt-4 text-xs text-on-surface-variant/40 text-center">
+            点击右上角的分享按钮，可以通过分享链接或微信分享卡片一键直达该作品
+          </p>
+        )}
       </div>
     </Modal>
   );
