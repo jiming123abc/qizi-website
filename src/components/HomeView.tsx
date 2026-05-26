@@ -3,7 +3,7 @@ import { PlayCircle, Play, ChevronLeft, ChevronRight } from 'lucide-react';
 import { ItemDetailModal } from './ItemDetailModal';
 import { isWeChat, copyToClipboard, setupShareMetadata } from '../lib/shareUtils';
 import { ShareHint } from './WeChatShareHint';
-import { getFeaturedWorks, getPortfolioItems, getHomeContent, getCategoriesWithDetails, PortfolioItem, HomeContent, CategoryWithDetails } from '../data/store';
+import { getFeaturedWorks, getPortfolioItems, getPublicPortfolioItems, getHomeContent, getCategoriesWithDetails, PortfolioItem, HomeContent, CategoryWithDetails } from '../data/store';
 
 const heroSlides = [
   {
@@ -104,6 +104,7 @@ export function HomeView() {
   const [selectedItem, setSelectedItem] = useState<typeof coreBusiness[0] | (PortfolioItem & { featuredId: string }) | (CategoryWithDetails & { id: string }) | null>(null);
   const [isWeChatHintVisible, setIsWeChatHintVisible] = useState(false);
   const [featuredItems, setFeaturedItems] = useState<(PortfolioItem & { featuredId: string })[]>([]);
+  const [allPortfolioItems, setAllPortfolioItems] = useState<PortfolioItem[]>([]);
   const [homeContent, setHomeContent] = useState<HomeContent>({
     heroTitle: '',
     heroGradientTitle: '',
@@ -134,8 +135,9 @@ export function HomeView() {
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [portfolioItems, featuredWorks, homeContent, categories] = await Promise.all([
+        const [allPortfolioItemsData, publicPortfolioItems, featuredWorks, homeContent, categories] = await Promise.all([
           getPortfolioItems(),
+          getPublicPortfolioItems(),
           getFeaturedWorks(),
           getHomeContent(),
           getCategoriesWithDetails()
@@ -143,7 +145,7 @@ export function HomeView() {
         
         const items = featuredWorks
           .map(fw => {
-            const item = portfolioItems.find(pi => pi.id === fw.portfolioId || Number(pi.id) === Number(fw.portfolioId));
+            const item = publicPortfolioItems.find(pi => pi.id === fw.portfolioId || Number(pi.id) === Number(fw.portfolioId));
             if (item) {
               return { ...item, featuredId: fw.id };
             }
@@ -156,6 +158,7 @@ export function HomeView() {
             return aOrder - bOrder;
           });
         
+        setAllPortfolioItems(allPortfolioItemsData);
         setFeaturedItems(items);
         setHomeContent(homeContent);
         setCategories(categories);
@@ -203,12 +206,14 @@ export function HomeView() {
         const item = featuredItems.find(w => w.featuredId === id);
         if (item) setSelectedItem(item);
       } else {
-        // 尝试在精选作品中查找普通 portfolio ID
-        const item = featuredItems.find(w => w.id.toString() === id);
-        if (item) setSelectedItem(item);
+        // 首先在所有作品中查找普通 portfolio ID（包括隐藏作品）
+        const item = allPortfolioItems.find(p => p.id.toString() === id);
+        if (item) {
+          setSelectedItem(item as any);
+        }
       }
     }
-  }, [featuredItems]);
+  }, [featuredItems, allPortfolioItems]);
 
   // Update share metadata when opening/closing detail modal
   // Do NOT update URL to avoid WeChat bottom bar

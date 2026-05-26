@@ -3,12 +3,13 @@ import { ChevronLeft, ChevronRight, Play } from 'lucide-react';
 import { ItemDetailModal } from './ItemDetailModal';
 import { isWeChat, copyToClipboard, setupShareMetadata } from '../lib/shareUtils';
 import { ShareHint } from './WeChatShareHint';
-import { getPortfolioItems, getCategoriesWithDetails, getHomeContent, PortfolioItem } from '../data/store';
+import { getPortfolioItems, getPublicPortfolioItems, getCategoriesWithDetails, getHomeContent, PortfolioItem } from '../data/store';
 
 export function PortfolioView() {
   const [activeCategory, setActiveCategory] = useState('全部作品');
   const [selectedItem, setSelectedItem] = useState<PortfolioItem | null>(null);
   const [items, setItems] = useState<PortfolioItem[]>([]);
+  const [allItems, setAllItems] = useState<PortfolioItem[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [defaultImage, setDefaultImage] = useState('');
   const [defaultShareTitle, setDefaultShareTitle] = useState('大连柒子文化发展有限公司');
@@ -30,12 +31,14 @@ export function PortfolioView() {
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [itemsData, categoriesData, homeContentData] = await Promise.all([
+        const [allItemsData, publicItemsData, categoriesData, homeContentData] = await Promise.all([
           getPortfolioItems(),
+          getPublicPortfolioItems(),
           getCategoriesWithDetails(),
           getHomeContent()
         ]);
-        setItems(itemsData);
+        setAllItems(allItemsData);
+        setItems(publicItemsData);
         setCategories(['全部作品', ...categoriesData.map(c => c.name)]);
         setDefaultImage(homeContentData.heroImage || '');
         setDefaultShareTitle(homeContentData.shareTitle || '大连柒子文化发展有限公司');
@@ -52,13 +55,13 @@ export function PortfolioView() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const id = params.get('id');
-    if (id && items.length > 0) {
-      const item = items.find(p => p.id.toString() === id);
+    if (id && allItems.length > 0) {
+      const item = allItems.find(p => p.id.toString() === id);
       if (item) {
         setSelectedItem(item);
       }
     }
-  }, [items]);
+  }, [allItems]);
 
   // Update share metadata when opening/closing detail modal
   // Do NOT update URL to avoid WeChat bottom bar

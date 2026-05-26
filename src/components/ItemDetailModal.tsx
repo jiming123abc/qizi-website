@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Play, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Modal } from './Modal';
+import { ImageViewerModal } from './ImageViewerModal';
 
 // 接口定义
 interface SimpleItem {
@@ -31,6 +32,8 @@ interface ItemDetailModalProps {
 export function ItemDetailModal({ isOpen, onClose, item, onShare }: ItemDetailModalProps) {
   const [isVideoPlaying, setIsVideoPlaying] = useState(false);
   const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
+  const [imageViewerOpen, setImageViewerOpen] = useState(false);
+  const [currentViewImage, setCurrentViewImage] = useState<string>('');
   const videoRef = useRef<HTMLVideoElement>(null);
   const touchStartX = useRef<number>(0);
 
@@ -106,6 +109,20 @@ export function ItemDetailModal({ isOpen, onClose, item, onShare }: ItemDetailMo
     }
   };
 
+  // 获取当前轮播图的图片URL
+  const getCurrentImageUrl = () => {
+    if (currentSlideIndex === 0) {
+      return imageSrc;
+    }
+    return imagesList[currentSlideIndex - 1];
+  };
+
+  // 简单可靠的图片点击处理
+  const openImageViewer = (imgUrl: string) => {
+    setCurrentViewImage(imgUrl);
+    setImageViewerOpen(true);
+  };
+
   return (
     <Modal isOpen={isOpen} onClose={onClose} onShare={showShare ? onShare : undefined}>
       <div className="flex flex-col h-full relative bg-surface-container-low">
@@ -159,26 +176,36 @@ export function ItemDetailModal({ isOpen, onClose, item, onShare }: ItemDetailMo
                 className="h-full flex transition-transform duration-500"
                 style={{ transform: `translateX(-${currentSlideIndex * 100}%)` }}
               >
-                <img
-                  src={imageSrc}
-                  alt={title}
-                  className="w-full h-full object-cover flex-shrink-0"
-                  loading="lazy"
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).src = '/images/hero-home.png';
-                  }}
-                />
-                {imagesList.map((imgUrl: string, idx: number) => (
+                <div 
+                  className="w-full h-full flex-shrink-0 cursor-pointer"
+                  onClick={() => openImageViewer(imageSrc)}
+                >
                   <img
-                    key={idx}
-                    src={imgUrl}
-                    alt={`${title} ${idx + 1}`}
-                    className="w-full h-full object-cover flex-shrink-0"
+                    src={imageSrc}
+                    alt={title}
+                    className="w-full h-full object-cover"
                     loading="lazy"
                     onError={(e) => {
                       (e.target as HTMLImageElement).src = '/images/hero-home.png';
                     }}
                   />
+                </div>
+                {imagesList.map((imgUrl: string, idx: number) => (
+                  <div 
+                    key={idx}
+                    className="w-full h-full flex-shrink-0 cursor-pointer"
+                    onClick={() => openImageViewer(imgUrl)}
+                  >
+                    <img
+                      src={imgUrl}
+                      alt={`${title} ${idx + 1}`}
+                      className="w-full h-full object-cover"
+                      loading="lazy"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src = '/images/hero-home.png';
+                      }}
+                    />
+                  </div>
                 ))}
               </div>
               {/* 左箭头 */}
@@ -187,7 +214,7 @@ export function ItemDetailModal({ isOpen, onClose, item, onShare }: ItemDetailMo
                   e.stopPropagation();
                   setCurrentSlideIndex((prev) => Math.max(0, prev - 1));
                 }}
-                className="absolute left-4 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/40 backdrop-blur-md border border-white/10 text-white/70 hover:text-white hover:bg-black/60 transition-all sm:opacity-0 sm:group-hover:opacity-100"
+                className="absolute left-4 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/40 backdrop-blur-md border border-white/10 text-white/70 hover:text-white hover:bg-black/60 transition-all"
               >
                 <ChevronLeft className="w-6 h-6" />
               </button>
@@ -197,7 +224,7 @@ export function ItemDetailModal({ isOpen, onClose, item, onShare }: ItemDetailMo
                   e.stopPropagation();
                   setCurrentSlideIndex((prev) => Math.min(totalSlides - 1, prev + 1));
                 }}
-                className="absolute right-4 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/40 backdrop-blur-md border border-white/10 text-white/70 hover:text-white hover:bg-black/60 transition-all sm:opacity-0 sm:group-hover:opacity-100"
+                className="absolute right-4 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/40 backdrop-blur-md border border-white/10 text-white/70 hover:text-white hover:bg-black/60 transition-all"
               >
                 <ChevronRight className="w-6 h-6" />
               </button>
@@ -219,7 +246,10 @@ export function ItemDetailModal({ isOpen, onClose, item, onShare }: ItemDetailMo
             </div>
           ) : (
             // 单图
-            <div className="w-full h-full">
+            <div 
+              className="w-full h-full cursor-pointer"
+              onClick={() => openImageViewer(imageSrc)}
+            >
               <img
                 src={imageSrc}
                 alt={title}
@@ -228,7 +258,7 @@ export function ItemDetailModal({ isOpen, onClose, item, onShare }: ItemDetailMo
                   (e.target as HTMLImageElement).src = '/images/hero-home.png';
                 }}
               />
-              <div className="absolute inset-0 bg-gradient-to-t from-surface-container-low via-surface-container-low/20 to-transparent"></div>
+              <div className="absolute inset-0 bg-gradient-to-t from-surface-container-low via-surface-container-low/20 to-transparent pointer-events-none"></div>
             </div>
           )}
         </div>
@@ -263,5 +293,13 @@ export function ItemDetailModal({ isOpen, onClose, item, onShare }: ItemDetailMo
         )}
       </div>
     </Modal>
+
+    {/* 图片查看器 */}
+    <ImageViewerModal
+      isOpen={imageViewerOpen}
+      onClose={() => setImageViewerOpen(false)}
+      imageUrl={currentViewImage}
+      alt={title}
+    />
   );
 }

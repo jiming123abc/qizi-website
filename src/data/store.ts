@@ -12,6 +12,7 @@ export interface PortfolioItem {
   color: string;
   bgGlow: string;
   sortOrder: number;
+  hidden?: boolean;
 }
 
 export interface Category {
@@ -113,6 +114,11 @@ async function saveItems<T extends { id: any }>(endpoint: string, items: T[]): P
 
 export async function getPortfolioItems(): Promise<PortfolioItem[]> {
   return apiGet<PortfolioItem[]>('portfolio-items', 'Failed to fetch portfolio items');
+}
+
+export async function getPublicPortfolioItems(): Promise<PortfolioItem[]> {
+  const items = await getPortfolioItems();
+  return items.filter(item => !item.hidden);
 }
 
 export async function savePortfolioItems(items: PortfolioItem[]): Promise<void> {

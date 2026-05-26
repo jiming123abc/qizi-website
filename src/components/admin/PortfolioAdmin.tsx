@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { 
   Plus, 
   Edit2, 
@@ -14,7 +14,9 @@ import {
   FileImage,
   GripVertical,
   ChevronUp,
-  ChevronDown
+  ChevronDown,
+  EyeOff,
+  Eye
 } from 'lucide-react';
 import { 
   getPortfolioItems, 
@@ -25,6 +27,7 @@ import {
   getCategoriesWithDetails,
   PortfolioItem 
 } from '../../data/store';
+import { generateQRCode } from '../../lib/qrCode';
 import { uploadImage, checkVideoBitrate, uploadVideoDirectToOSS, uploadVideoToServerWithCompression, uploadVideoWithBrowserCompression, UploadError } from '../../lib/ossUtils';
 import { validateVodUrl } from '../../lib/vodUtils';
 
@@ -83,8 +86,16 @@ export function PortfolioAdmin() {
     videoUrl: '',
     type: 'image' as 'image' | 'video',
     color: 'text-primary',
-    bgGlow: 'bg-primary/20'
+    bgGlow: 'bg-primary/20',
+    hidden: false
   });
+
+  const qrCodeUrl = useMemo(() => {
+    if (editingItem) {
+      return generateQRCode(`${window.location.origin}?id=${editingItem.id}`, 128);
+    }
+    return '';
+  }, [editingItem]);
   const [additionalImagesUploading, setAdditionalImagesUploading] = useState(false);
 
   useEffect(() => {
@@ -191,7 +202,8 @@ export function PortfolioAdmin() {
       videoUrl: '',
       type: 'image',
       color: 'text-primary',
-      bgGlow: 'bg-primary/20'
+      bgGlow: 'bg-primary/20',
+      hidden: false
     });
     setViewMode('create');
   };
@@ -211,7 +223,8 @@ export function PortfolioAdmin() {
       videoUrl: item.videoUrl || '',
       type: item.type,
       color: item.color,
-      bgGlow: item.bgGlow
+      bgGlow: item.bgGlow,
+      hidden: !!item.hidden
     });
     setViewMode('edit');
   };
@@ -1055,6 +1068,47 @@ export function PortfolioAdmin() {
               />
             </div>
 
+            <div className="bg-surface-container-low rounded-xl border border-white/10 p-4">
+              <div className="flex items-center justify-between mb-3">
+                <label className="text-sm font-label text-on-surface flex items-center gap-2">
+                  {formData.hidden ? <EyeOff className="w-4 h-4 text-yellow-400" /> : <Eye className="w-4 h-4" />}
+                  隐藏作品
+                </label>
+                <button
+                  onClick={() => setFormData(prev => ({ ...prev, hidden: !prev.hidden }))}
+                  className={`w-14 h-7 rounded-full transition-colors relative ${
+                    formData.hidden ? 'bg-yellow-500' : 'bg-white/20'
+                  }`}
+                >
+                  <div className={`absolute top-1 w-5 h-5 bg-white rounded-full transition-transform ${
+                    formData.hidden ? 'left-8' : 'left-1'
+                  }`} />
+                </button>
+              </div>
+              
+              {formData.hidden && editingItem && (
+                <div className="mt-4 p-4 bg-black/30 rounded-lg border border-yellow-500/30">
+                  <p className="text-xs text-on-surface-variant mb-3">
+                    扫描二维码访问该作品（仅在后台可见）
+                  </p>
+                  <div className="flex items-center gap-4">
+                    <div className="bg-white p-2 rounded-lg">
+                      <img
+                        src={qrCodeUrl}
+                        alt="QR Code"
+                        className="w-32 h-32"
+                      />
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-xs text-on-surface-variant break-all">
+                        {window.location.origin}?id={editingItem.id}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
             <div className="flex gap-4 pt-4">
               <button
                 onClick={handleCancel}
@@ -1179,7 +1233,15 @@ export function PortfolioAdmin() {
                 />
 
                 <div className="flex-1 min-w-0">
-                  <div className="font-headline font-medium text-on-surface truncate">{item.title}</div>
+                  <div className="flex items-center gap-2">
+                    <div className="font-headline font-medium text-on-surface truncate">{item.title}</div>
+                    {item.hidden && (
+                      <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-yellow-500/20 text-yellow-400 text-xs">
+                        <EyeOff className="w-3 h-3" />
+                        已隐藏
+                      </span>
+                    )}
+                  </div>
                   <div className="text-xs text-on-surface-variant">{item.tag}</div>
                 </div>
 
