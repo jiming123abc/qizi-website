@@ -25,7 +25,7 @@ import {
   getCategoriesWithDetails,
   PortfolioItem 
 } from '../../data/store';
-import { uploadImage, uploadVideo, UploadError, VideoCompressionError } from '../../lib/ossUtils';
+import { uploadImage, checkVideoBitrate, uploadVideoDirectToOSS, uploadVideoToServerWithCompression, uploadVideoWithBrowserCompression, UploadError } from '../../lib/ossUtils';
 import { validateVodUrl } from '../../lib/vodUtils';
 
 type ViewMode = 'list' | 'create' | 'edit';
@@ -65,9 +65,11 @@ export function PortfolioAdmin() {
     progress: number;
     message: string;
   }>({ phase: 'idle', progress: 0, message: '' });
-  const [showCompressionErrorDialog, setShowCompressionErrorDialog] = useState(false);
-  const [pendingCompressionError, setPendingCompressionError] = useState<VideoCompressionError | null>(null);
-  const [pendingVideoFile, setPendingVideoFile] = useState<File | null>(null);
+  const [showHighBitrateDialog, setShowHighBitrateDialog] = useState(false);
+  const [pendingHighBitrateFile, setPendingHighBitrateFile] = useState<File | null>(null);
+  const [pendingHighBitrateInfo, setPendingHighBitrateInfo] = useState<{ bitrateKbps: number | null; fileSizeMB: string; serverCompressionAvailable: boolean } | null>(null);
+  const [showCompressionFailedDialog, setShowCompressionFailedDialog] = useState(false);
+  const [pendingCompressionFailedUrl, setPendingCompressionFailedUrl] = useState<string | null>(null);
   const [pendingForceLocal, setPendingForceLocal] = useState(false);
 
   const [formData, setFormData] = useState({
@@ -264,128 +266,197 @@ export function PortfolioAdmin() {
     }
   };
 
-  const handleVideoUpload = async (file: File, forceLocal: boolean = false) => {
+  const handleVideoUpload = async (file: File, _forceLocal: boolean = false) => {
     setIsLoading(true);
     const fileSizeMB = (file.size / 1024 / 1024).toFixed(2);
 
     setVideoUploadStatus({ 
       phase: 'checking', 
       progress: 0, 
-      message: `正在处理视频 (${fileSizeMB}MB)...` 
+      message: `正在检测视频码率...` 
     });
 
     try {
-      const result = await uploadVideo(file, (progress) => {
-        setVideoUploadStatus({ ...progress, phase: progress.phase as any });
-      }, forceLocal);
+      const check = await checkVideoBitrate(file);
       
-      if (result.success) {
+      if (check.decision === 'direct_oss') {
+        const bitrateMsg = check.bitrateKbps ? ` (码率 ${check.bitrateKbps}kbps)` : '';
+        setVideoUploadStatus({ 
+          phase: 'uploading', 
+          progress: 0, 
+          message: `正在上传视频 (${fileSizeMB}MB)${bitrateMsg}...` 
+        });
+
+        const result = await uploadVideoDirectToOSS(file, (progress) => {
+          setVideoUploadStatus({ ...progress, phase: progress.phase as any });
+        });
+
         setFormData(prev => ({ ...prev, videoUrl: result.url }));
-        
-        setVideoUploadStatus(prev => ({ 
-          ...prev,
-          phase: 'done', 
-          progress: 100 
-        }));
-      } else {
-        setPendingCompressionError(result.compressionError);
-        setPendingVideoFile(file);
-        setPendingForceLocal(forceLocal);
-        setShowCompressionErrorDialog(true);
-        setVideoUploadStatus({ phase: 'idle', progress: 0, message: '' });
+        setVideoUploadStatus(prev => ({ ...prev, phase: 'done', progress: 100 }));
+        setIsLoading(false);
+        return;
       }
+
+      setVideoUploadStatus({ phase: 'idle', progress: 0, message: '' });
+      setPendingHighBitrateFile(file);
+      setPendingHighBitrateInfo({
+        bitrateKbps: check.bitrateKbps,
+        fileSizeMB,
+        serverCompressionAvailable: check.serverCompressionAvailable,
+      });
+      setShowHighBitrateDialog(true);
+      setIsLoading(false);
     } catch (error) {
       const uploadError = error as UploadError;
-      if (uploadError.ossError) {
-        const useLocal = confirm(
-          `${uploadError.message}\n\n是否使用本地存储？`
-        );
-        if (useLocal) {
-          await handleVideoUpload(file, true);
-        }
-      } else {
-        setVideoUploadStatus({ 
-          phase: 'done', 
-          progress: 0, 
-          message: `上传失败: ${uploadError.message}` 
-        });
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleUploadOriginalVideo = async () => {
-    if (!pendingVideoFile) return;
-    
-    setShowCompressionErrorDialog(false);
-    await uploadVideoWithoutCompression(pendingVideoFile, pendingForceLocal);
-    
-    setPendingCompressionError(null);
-    setPendingVideoFile(null);
-    setPendingForceLocal(false);
-  };
-
-  const uploadVideoWithoutCompression = async (file: File, forceLocal: boolean = false) => {
-    setIsLoading(true);
-    const fileSizeMB = (file.size / 1024 / 1024).toFixed(2);
-
-    setVideoUploadStatus({ 
-      phase: 'uploading', 
-      progress: 0, 
-      message: `正在上传原视频 (${fileSizeMB}MB)...` 
-    });
-
-    const formData = new FormData();
-    formData.append('file', file);
-
-    const API_BASE_URL = import.meta.env.VITE_API_URL || import.meta.env.REACT_APP_API_URL || 'http://localhost:5000';
-    const url = new URL(`${API_BASE_URL}/api/upload/video`);
-    if (forceLocal) {
-      url.searchParams.set('forceLocal', 'true');
-    }
-
-    try {
-      const response = await fetch(url.toString(), {
-        method: 'POST',
-        body: formData
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.message || error.error || '上传失败');
-      }
-
-      const result = await response.json();
-      setFormData(prev => ({ ...prev, videoUrl: result.url }));
-      
-      setVideoUploadStatus(prev => ({ 
-        ...prev,
-        phase: 'done', 
-        progress: 100,
-        message: '视频上传成功' 
-      }));
-    } catch (error) {
       setVideoUploadStatus({ 
         phase: 'done', 
         progress: 0, 
-        message: `上传失败: ${(error as Error).message}` 
+        message: `检测失败: ${uploadError.message}` 
       });
-    } finally {
       setIsLoading(false);
     }
   };
 
-  const handleCancelAndManualUpload = () => {
-    setShowCompressionErrorDialog(false);
-    setPendingCompressionError(null);
-    setPendingVideoFile(null);
-    setPendingForceLocal(false);
-    setVideoSourceType('url');
+  const handleConfirmHighBitrateUpload = async () => {
+    if (!pendingHighBitrateFile || !pendingHighBitrateInfo) return;
+    
+    if (!pendingHighBitrateInfo.serverCompressionAvailable) {
+      setShowHighBitrateDialog(false);
+      setVideoUploadStatus({ 
+        phase: 'done', 
+        progress: 0, 
+        message: '文件超过 Cloudflare 200MB 限制，无法使用服务器压缩。请使用浏览器压缩或自行压缩后上传。' 
+      });
+      return;
+    }
+    
+    setShowHighBitrateDialog(false);
+    setIsLoading(true);
+
+    setVideoUploadStatus({ 
+      phase: 'compressing', 
+      progress: 0, 
+      message: `正在上传至服务器压缩 (${pendingHighBitrateInfo.fileSizeMB}MB)...` 
+    });
+
+    try {
+      const result = await uploadVideoToServerWithCompression(pendingHighBitrateFile, (progress) => {
+        setVideoUploadStatus({ ...progress, phase: progress.phase as any });
+      });
+
+      if (result.compressionFailed) {
+        setPendingCompressionFailedUrl(result.url);
+        setShowCompressionFailedDialog(true);
+        setVideoUploadStatus({ phase: 'idle', progress: 0, message: '' });
+        setIsLoading(false);
+        return;
+      }
+
+      setFormData(prev => ({ ...prev, videoUrl: result.url }));
+      setVideoUploadStatus(prev => ({ ...prev, phase: 'done', progress: 100 }));
+      setIsLoading(false);
+    } catch (error) {
+      const uploadError = error as UploadError;
+      setShowCompressionFailedDialog(true);
+      setPendingCompressionFailedUrl(null);
+      setShowHighBitrateDialog(false);
+      setVideoUploadStatus({ phase: 'idle', progress: 0, message: '' });
+      setIsLoading(false);
+    }
+  };
+
+  const handleCancelHighBitrateUpload = () => {
+    setShowHighBitrateDialog(false);
+    setPendingHighBitrateFile(null);
+    setPendingHighBitrateInfo(null);
     setVideoUploadStatus({ 
       phase: 'done', 
       progress: 0, 
-      message: '您可手动压缩后再尝试上传，如果仍然失败，将压缩后的视频上传至阿里云 OSS，然后在视频 URL 输入框粘贴地址即可。' 
+      message: '您可以自行压缩视频后再尝试上传。' 
+    });
+  };
+
+  const handleBrowserCompressUpload = async () => {
+    if (!pendingHighBitrateFile || !pendingHighBitrateInfo) return;
+    
+    setShowHighBitrateDialog(false);
+    setIsLoading(true);
+
+    setVideoUploadStatus({ 
+      phase: 'compressing', 
+      progress: 0, 
+      message: '正在加载浏览器压缩组件...' 
+    });
+
+    try {
+      const result = await uploadVideoWithBrowserCompression(pendingHighBitrateFile, (progress) => {
+        setVideoUploadStatus({ ...progress, phase: progress.phase as any });
+      });
+
+      setFormData(prev => ({ ...prev, videoUrl: result.url }));
+      setVideoUploadStatus(prev => ({ ...prev, phase: 'done', progress: 100 }));
+      setIsLoading(false);
+    } catch (error) {
+      const uploadError = error as UploadError;
+      const serverAvailable = pendingHighBitrateInfo.serverCompressionAvailable;
+      setVideoUploadStatus({ 
+        phase: 'done', 
+        progress: 0, 
+        message: `浏览器压缩失败: ${uploadError.message}${serverAvailable ? '。可尝试改用服务器压缩上传。' : '。请自行压缩后重新上传。'}` 
+      });
+      setIsLoading(false);
+    }
+  };
+
+  const handleRetryWithBrowserCompression = async () => {
+    if (!pendingHighBitrateFile || !pendingHighBitrateInfo) {
+      setShowCompressionFailedDialog(false);
+      return;
+    }
+    setShowCompressionFailedDialog(false);
+    setIsLoading(true);
+    setVideoUploadStatus({ 
+      phase: 'compressing', 
+      progress: 0, 
+      message: '正在加载浏览器压缩组件...' 
+    });
+    try {
+      const result = await uploadVideoWithBrowserCompression(pendingHighBitrateFile, (progress) => {
+        setVideoUploadStatus({ ...progress, phase: progress.phase as any });
+      });
+      setFormData(prev => ({ ...prev, videoUrl: result.url }));
+      setVideoUploadStatus(prev => ({ ...prev, phase: 'done', progress: 100 }));
+      setIsLoading(false);
+    } catch (error) {
+      const uploadError = error as UploadError;
+      setVideoUploadStatus({ 
+        phase: 'done', 
+        progress: 0, 
+        message: `浏览器压缩失败: ${uploadError.message}。请自行压缩后重新上传。` 
+      });
+      setIsLoading(false);
+    }
+  };
+
+  const handleUseOriginalVideo = () => {
+    if (!pendingCompressionFailedUrl) return;
+    setShowCompressionFailedDialog(false);
+    setFormData(prev => ({ ...prev, videoUrl: pendingCompressionFailedUrl }));
+    setPendingCompressionFailedUrl(null);
+    setVideoUploadStatus({ 
+      phase: 'done', 
+      progress: 100, 
+      message: '已使用原始视频。建议后续手动压缩后替换。' 
+    });
+  };
+
+  const handleDiscardAfterCompressionFailed = () => {
+    setShowCompressionFailedDialog(false);
+    setPendingCompressionFailedUrl(null);
+    setVideoUploadStatus({ 
+      phase: 'done', 
+      progress: 0, 
+      message: '您可手动压缩后再重新上传。' 
     });
   };
 
@@ -467,35 +538,111 @@ export function PortfolioAdmin() {
     return (
       <div className="p-8">
         {/* Compression Error Dialog */}
-        {showCompressionErrorDialog && (
+        {showHighBitrateDialog && pendingHighBitrateInfo && (
+          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+            <div className="bg-surface-container rounded-2xl border border-white/10 p-6 max-w-md w-full">
+              <div className="flex items-start gap-3 mb-4">
+                <AlertCircle className="w-6 h-6 text-yellow-400 flex-shrink-0" />
+                <div>
+                  <h3 className="font-headline text-lg font-bold text-on-surface">视频码率过高</h3>
+                  <p className="text-sm text-on-surface-variant mt-1">
+                    当前视频码率{' '}
+                    {pendingHighBitrateInfo.bitrateKbps !== null ? (
+                      <span className="font-bold text-yellow-400">{pendingHighBitrateInfo.bitrateKbps}kbps</span>
+                    ) : (
+                      <span className="font-bold text-yellow-400">未能检测</span>
+                    )}
+                    ，超过建议的 2500kbps，建议压缩后上传。
+                  </p>
+                  {!pendingHighBitrateInfo.serverCompressionAvailable && (
+                    <p className="text-sm text-red-400 mt-2">
+                      文件超过 Cloudflare 95MB 限制，无法通过服务器压缩。请使用浏览器压缩或自行压缩后上传。
+                    </p>
+                  )}
+                </div>
+              </div>
+              <div className="space-y-2">
+                <button
+                  onClick={handleCancelHighBitrateUpload}
+                  className="w-full px-4 py-3 rounded-xl bg-surface-container-low border border-white/10 text-on-surface-variant hover:text-on-surface transition-colors text-left"
+                >
+                  <div className="text-sm font-medium">取消上传</div>
+                  <div className="text-xs text-on-surface-variant/60 mt-0.5">手动将视频压缩后再次上传</div>
+                </button>
+                <button
+                  onClick={handleBrowserCompressUpload}
+                  className="w-full px-4 py-3 rounded-xl bg-green-600 text-white hover:bg-green-500 transition-colors text-left"
+                >
+                  <div className="text-sm font-medium">浏览器自动压缩上传</div>
+                  <div className="text-xs text-white/70 mt-0.5">首次使用会自动下载压缩组件，处理速度慢</div>
+                </button>
+                <p className="text-xs text-on-surface-variant/50 px-1">建议视频文件不超过 500MB，过大可能导致浏览器崩溃</p>
+                {pendingHighBitrateInfo.serverCompressionAvailable ? (
+                  <button
+                    onClick={handleConfirmHighBitrateUpload}
+                    className="w-full px-4 py-3 rounded-xl bg-primary text-on-primary hover:bg-primary/90 transition-colors text-left"
+                  >
+                    <div className="text-sm font-medium">服务器自动压缩上传</div>
+                    <div className="text-xs text-on-primary/70 mt-0.5">需上传远程服务器，处理速度慢</div>
+                  </button>
+                ) : (
+                  <button
+                    disabled
+                    className="w-full px-4 py-3 rounded-xl bg-surface-container-low border border-white/10 text-on-surface-variant/50 cursor-not-allowed text-left"
+                  >
+                    <div className="text-sm font-medium">服务器自动压缩上传（不可用）</div>
+                    <div className="text-xs mt-0.5">文件超过 Cloudflare 95MB 限制</div>
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showCompressionFailedDialog && (
           <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
             <div className="bg-surface-container rounded-2xl border border-white/10 p-6 max-w-md w-full">
               <div className="flex items-start gap-3 mb-4">
                 <AlertCircle className="w-6 h-6 text-red-400 flex-shrink-0" />
                 <div>
-                  <h3 className="font-headline text-lg font-bold text-on-surface">视频处理遇到问题</h3>
+                  <h3 className="font-headline text-lg font-bold text-on-surface">
+                    {pendingCompressionFailedUrl ? '视频压缩未减小' : '服务器上传失败'}
+                  </h3>
                   <p className="text-sm text-on-surface-variant mt-1">
-                    {pendingCompressionError?.message}
+                    {pendingCompressionFailedUrl
+                      ? '服务器压缩后文件未减小，已保留原始视频。'
+                      : '视频上传至服务器失败，可能因为文件过大超出 Cloudflare 限制。'}
+                  </p>
+                  <p className="text-xs text-on-surface-variant/60 mt-3">
+                    {pendingCompressionFailedUrl
+                      ? '建议您使用浏览器压缩后再上传。'
+                      : '建议您改用浏览器压缩，或自行压缩后重新上传。'}
                   </p>
                 </div>
               </div>
-              <div className="space-y-3">
+              <div className="space-y-2">
+                {pendingCompressionFailedUrl ? (
+                  <button
+                    onClick={handleUseOriginalVideo}
+                    className="w-full px-4 py-3 rounded-xl bg-primary text-on-primary hover:bg-primary/90 transition-colors"
+                  >
+                    使用原始视频
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleRetryWithBrowserCompression}
+                    className="w-full px-4 py-3 rounded-xl bg-green-600 text-white hover:bg-green-500 transition-colors"
+                  >
+                    改用浏览器压缩上传
+                  </button>
+                )}
                 <button
-                  onClick={handleUploadOriginalVideo}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-primary text-on-primary hover:bg-primary/90 transition-colors"
+                  onClick={handleDiscardAfterCompressionFailed}
+                  className="w-full px-4 py-3 rounded-xl bg-surface-container-low border border-white/10 text-on-surface-variant hover:text-on-surface transition-colors"
                 >
-                  直接上传原视频（文件较大）
-                </button>
-                <button
-                  onClick={handleCancelAndManualUpload}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-surface-container-low border border-white/10 text-on-surface-variant hover:text-on-surface transition-colors"
-                >
-                  取消，我自己上传到 OSS
+                  {pendingCompressionFailedUrl ? '放弃，自行压缩后上传' : '取消上传'}
                 </button>
               </div>
-              <p className="text-xs text-on-surface-variant/70 mt-4">
-                提示：您可手动压缩后再尝试上传，如果仍然失败，将压缩后的视频上传至阿里云 OSS，然后在视频 URL 输入框粘贴地址即可。
-              </p>
             </div>
           </div>
         )}
@@ -761,6 +908,7 @@ export function PortfolioAdmin() {
                           onChange={(e) => {
                             const file = e.target.files?.[0];
                             if (file) handleVideoUpload(file);
+                            e.target.value = '';
                           }}
                           className="hidden"
                         />

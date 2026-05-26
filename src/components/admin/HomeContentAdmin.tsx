@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Save, Image, Link, FileImage, Loader2, Plus, X } from 'lucide-react';
 import { getHomeContent, saveHomeContent, HomeContent } from '../../data/store';
-import { uploadImageToOSS, UploadError } from '../../lib/ossUtils';
+import { uploadImage, UploadError } from '../../lib/ossUtils';
 
 export function HomeContentAdmin() {
   const [content, setContent] = useState<HomeContent>({
@@ -34,7 +34,8 @@ export function HomeContentAdmin() {
   const handleImageUpload = async (file: File, slideIndex?: number, isHeroImage?: boolean, forceLocal: boolean = false) => {
     setIsLoading(true);
     try {
-      const url = await uploadImageToOSS(file, forceLocal);
+      const result = await uploadImage(file, undefined, forceLocal);
+      const url = result.url;
       if (isHeroImage) {
         setContent(prev => ({ ...prev, heroImage: url }));
       } else if (slideIndex !== undefined) {

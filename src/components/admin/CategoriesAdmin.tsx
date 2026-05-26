@@ -1,7 +1,7 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿import { useState, useEffect } from 'react';
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿import { useState, useEffect } from 'react';
 import { Plus, GripVertical, ChevronUp, ChevronDown, Edit2, Trash2, Image, AlertCircle, Upload, Link as LinkIcon, Save, X } from 'lucide-react';
 import { getCategoriesWithDetails, addCategoryWithDetails, updateCategoryDetails, deleteCategoryWithDetails, CategoryWithDetails } from '../../data/store';
-import { uploadImageToOSS } from '../../lib/ossUtils';
+import { uploadImage } from '../../lib/ossUtils';
 
 export function CategoriesAdmin() {
   const [categories, setCategories] = useState<CategoryWithDetails[]>([]);
@@ -69,9 +69,9 @@ export function CategoriesAdmin() {
   const handleCoverImageUpload = async (file: File) => {
     setIsLoading(true);
     try {
-      const result = await uploadImageToOSS(file);
-      if (result) {
-        setFormData(prev => ({ ...prev, coverImage: result }));
+      const result = await uploadImage(file);
+      if (result.url) {
+        setFormData(prev => ({ ...prev, coverImage: result.url }));
       }
     } catch (error) {
       console.error('上传失败:', error);

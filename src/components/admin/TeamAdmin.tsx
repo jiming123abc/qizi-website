@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Plus, Edit2, Trash2, X, Upload, Image, Link, FileImage, Check, Loader2, AlertCircle, GripVertical, ChevronUp, ChevronDown } from 'lucide-react';
 import { getTeamMembers, addTeamMember, updateTeamMember, deleteTeamMember, updateTeamMembersSortOrder, TeamMember } from '../../data/store';
-import { uploadImageToOSS, UploadError } from '../../lib/ossUtils';
+import { uploadImage, UploadError } from '../../lib/ossUtils';
 
 type ViewMode = 'list' | 'create' | 'edit';
 
@@ -70,7 +70,8 @@ export function TeamAdmin() {
   const handleAvatarUpload = async (file: File, forceLocal: boolean = false) => {
     setIsLoading(true);
     try {
-      const url = await uploadImageToOSS(file, forceLocal);
+      const result = await uploadImage(file, undefined, forceLocal);
+      const url = result.url;
       setFormData(prev => ({ ...prev, avatar: url }));
     } catch (error) {
       const uploadError = error as UploadError;

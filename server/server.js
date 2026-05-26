@@ -70,7 +70,7 @@ app.use(express.json());
 
 app.use('/images', express.static(path.join(__dirname, '../public/images')));
 app.use('/uploads', express.static(path.join(__dirname, '../public/uploads')));
-app.use('/ffmpeg', express.static(path.join(__dirname, '../public/ffmpeg')));
+app.use('/ffmpeg', express.static(path.join(__dirname, '../dist/ffmpeg')));
 // 托管前端静态文件
 app.use(express.static(path.join(__dirname, '../dist')));
 
@@ -526,6 +526,29 @@ app.post('/api/upload/image', upload.single('file'), async (req, res) => {
   }
 });
 
+// OSS 预签名上传接口（客户端直传 OSS 使用）
+app.post('/api/oss/presign', async (req, res) => {
+  try {
+    if (!isOSSConfigured || !ossClient) {
+      return res.status(500).json({ error: 'OSS 未配置' });
+    }
+    const { folder, filename, contentType } = req.body;
+    if (!folder || !filename) {
+      return res.status(400).json({ error: '缺少参数 folder 或 filename' });
+    }
+    const key = `${folder}/${Date.now()}-${filename}`;
+    const signedUrl = ossClient.signatureUrl(key, {
+      method: 'PUT',
+      'Content-Type': contentType || 'application/octet-stream',
+    });
+    const publicUrl = `https://${ossClient.options.bucket}.${ossClient.options.region}.aliyuncs.com/${key}`;
+    res.json({ signedUrl, publicUrl, key });
+  } catch (error) {
+    console.error('生成预签名URL失败:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // 使用内存存储上传进度（生产环境可以使用Redis）
 const uploadProgressStore = new Map();
 
@@ -544,30 +567,68 @@ app.post('/api/upload/video', upload.single('file'), async (req, res) => {
 
     const fileName = req.file.filename;
     const filePath = req.file.path;
+    const shouldCompress = req.query.compress === 'true';
 
     let fileUrl = '';
-    
+    let compressed = false;
+    let compressionFailed = false;
+    let originalSizeKB = 0;
+    let compressedSizeKB = 0;
+
     // 检查是否强制使用本地存储（用于 OSS 失败后用户确认的情况）
     const forceLocalStorage = req.query.forceLocal === 'true';
-    
+
+    // 如果请求压缩，先读取文件并进行服务端压缩
+    let fileToUpload = filePath;
+    let fileBufferToUpload = null;
+    if (shouldCompress) {
+      try {
+        const fileBuffer = fs.readFileSync(filePath);
+        originalSizeKB = Math.round(fileBuffer.length / 1024);
+        const bitrate = await getVideoBitrate(fileBuffer);
+        if (bitrate && bitrate > 2500) {
+          console.log(`服务端压缩开始: 码率 ${bitrate}kbps, 文件大小 ${originalSizeKB}KB`);
+          const compressedBuffer = await compressVideo(fileBuffer, 2500);
+          compressedSizeKB = Math.round(compressedBuffer.length / 1024);
+          if (compressedBuffer.length < fileBuffer.length) {
+            compressed = true;
+            fileBufferToUpload = compressedBuffer;
+            console.log(`服务端压缩完成: ${originalSizeKB}KB -> ${compressedSizeKB}KB`);
+          } else {
+            compressionFailed = true;
+            fileBufferToUpload = fileBuffer;
+            console.log(`服务端压缩未减小文件，使用原始文件`);
+          }
+        } else {
+          fileBufferToUpload = fileBuffer;
+        }
+      } catch (compressError) {
+        console.warn('服务端压缩出错:', compressError.message);
+        compressionFailed = true;
+        try {
+          fileBufferToUpload = fs.readFileSync(filePath);
+        } catch (e) {
+          // 读取失败，使用文件路径
+          fileBufferToUpload = null;
+        }
+      }
+    }
+
     if (isOSSConfigured && !forceLocalStorage && ossClient) {
-      // 使用 OSS 上传
       try {
         const ossFileName = `videos/${fileName}`;
-        const result = await ossClient.put(ossFileName, filePath);
+        let result;
+        if (fileBufferToUpload) {
+          result = await ossClient.put(ossFileName, fileBufferToUpload);
+        } else {
+          result = await ossClient.put(ossFileName, filePath);
+        }
         fileUrl = result.url;
-        // 上传成功后删除本地临时文件
         fs.unlinkSync(filePath);
         console.log('使用 OSS 上传视频成功');
       } catch (ossError) {
         console.warn('OSS 上传失败:', ossError.message);
-        // 返回 OSS 失败错误，让前端询问用户是否使用本地存储
-        // 删除已保存的临时文件
-        try {
-          fs.unlinkSync(filePath);
-        } catch (e) {
-          console.warn('删除临时文件失败:', e.message);
-        }
+        try { fs.unlinkSync(filePath); } catch (e) {}
         return res.status(500).json({ 
           error: 'OSS 上传失败', 
           ossError: true,
@@ -575,21 +636,24 @@ app.post('/api/upload/video', upload.single('file'), async (req, res) => {
         });
       }
     } else {
-      // 使用本地存储 - 文件已经在磁盘上了
+      if (fileBufferToUpload && compressed) {
+        fs.writeFileSync(filePath, fileBufferToUpload);
+      }
       fileUrl = `/uploads/videos/${fileName}`;
       console.log('使用本地存储视频');
     }
 
-    res.json({ url: fileUrl });
+    res.json({ 
+      url: fileUrl,
+      compressed,
+      compressionFailed,
+      originalSizeKB,
+      compressedSizeKB
+    });
   } catch (error) {
     console.error('上传失败:', error);
-    // 清理已保存的文件
     if (req.file && req.file.path) {
-      try {
-        fs.unlinkSync(req.file.path);
-      } catch (e) {
-        console.warn('清理临时文件失败:', e.message);
-      }
+      try { fs.unlinkSync(req.file.path); } catch (e) {}
     }
     res.status(500).json({ error: '上传失败: ' + error.message });
   }
