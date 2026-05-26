@@ -32,6 +32,7 @@ export function ItemDetailModal({ isOpen, onClose, item, onShare }: ItemDetailMo
   const [isVideoPlaying, setIsVideoPlaying] = useState(false);
   const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const touchStartX = useRef<number>(0);
 
   // 重置状态当 item 变化时
   useEffect(() => {
@@ -142,7 +143,18 @@ export function ItemDetailModal({ isOpen, onClose, item, onShare }: ItemDetailMo
             </div>
           ) : hasMultipleImages ? (
             // 多图轮播
-            <div className="relative w-full h-full overflow-hidden group">
+            <div
+              className="relative w-full h-full overflow-hidden group"
+              onTouchStart={(e) => { touchStartX.current = e.touches[0].clientX; }}
+              onTouchEnd={(e) => {
+                const deltaX = e.changedTouches[0].clientX - touchStartX.current;
+                if (deltaX < -50) {
+                  setCurrentSlideIndex((prev) => Math.min(totalSlides - 1, prev + 1));
+                } else if (deltaX > 50) {
+                  setCurrentSlideIndex((prev) => Math.max(0, prev - 1));
+                }
+              }}
+            >
               <div
                 className="h-full flex transition-transform duration-500"
                 style={{ transform: `translateX(-${currentSlideIndex * 100}%)` }}
@@ -175,7 +187,7 @@ export function ItemDetailModal({ isOpen, onClose, item, onShare }: ItemDetailMo
                   e.stopPropagation();
                   setCurrentSlideIndex((prev) => Math.max(0, prev - 1));
                 }}
-                className="absolute left-4 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/40 backdrop-blur-md border border-white/10 text-white/70 hover:text-white hover:bg-black/60 transition-all opacity-0 group-hover:opacity-100"
+                className="absolute left-4 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/40 backdrop-blur-md border border-white/10 text-white/70 hover:text-white hover:bg-black/60 transition-all sm:opacity-0 sm:group-hover:opacity-100"
               >
                 <ChevronLeft className="w-6 h-6" />
               </button>
@@ -185,18 +197,22 @@ export function ItemDetailModal({ isOpen, onClose, item, onShare }: ItemDetailMo
                   e.stopPropagation();
                   setCurrentSlideIndex((prev) => Math.min(totalSlides - 1, prev + 1));
                 }}
-                className="absolute right-4 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/40 backdrop-blur-md border border-white/10 text-white/70 hover:text-white hover:bg-black/60 transition-all opacity-0 group-hover:opacity-100"
+                className="absolute right-4 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/40 backdrop-blur-md border border-white/10 text-white/70 hover:text-white hover:bg-black/60 transition-all sm:opacity-0 sm:group-hover:opacity-100"
               >
                 <ChevronRight className="w-6 h-6" />
               </button>
               {/* 指示点 */}
               <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2">
-                <span className={`w-2 h-2 rounded-full transition-all ${currentSlideIndex === 0 ? 'bg-white w-4' : 'bg-white/50'}`}></span>
+                <button
+                  onClick={(e) => { e.stopPropagation(); setCurrentSlideIndex(0); }}
+                  className={`w-2 h-2 rounded-full transition-all ${currentSlideIndex === 0 ? 'bg-white w-4' : 'bg-white/50'}`}
+                />
                 {imagesList.map((_, idx: number) => (
-                  <span
+                  <button
                     key={idx}
+                    onClick={(e) => { e.stopPropagation(); setCurrentSlideIndex(idx + 1); }}
                     className={`w-2 h-2 rounded-full transition-all ${currentSlideIndex === idx + 1 ? 'bg-white w-4' : 'bg-white/50'}`}
-                  ></span>
+                  />
                 ))}
               </div>
               <div className="absolute inset-0 bg-gradient-to-t from-surface-container-low via-surface-container-low/20 to-transparent pointer-events-none"></div>
