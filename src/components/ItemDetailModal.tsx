@@ -121,6 +121,7 @@ export function ItemDetailModal({ isOpen, onClose, item, onShare }: ItemDetailMo
                 src={safeItem.videoUrl}
                 className="w-full h-full object-cover cursor-pointer"
                 loop
+                controls
                 playsInline
                 onClick={toggleVideoPlay}
                 onPlay={() => setIsVideoPlaying(true)}
