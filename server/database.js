@@ -35,6 +35,7 @@ function initDatabase() {
         type TEXT DEFAULT 'image',
         color TEXT,
         bgGlow TEXT,
+        hidden INTEGER DEFAULT 0,
         sortOrder INTEGER DEFAULT 0,
         createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
         updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -56,6 +57,16 @@ function initDatabase() {
             console.error('Error adding images column to portfolio_items:', err);
           } else {
             console.log('Added images column to portfolio_items');
+          }
+        });
+      }
+
+      if (!columnNames.includes('hidden')) {
+        db.run('ALTER TABLE portfolio_items ADD COLUMN hidden INTEGER DEFAULT 0', (err) => {
+          if (err) {
+            console.error('Error adding hidden column to portfolio_items:', err);
+          } else {
+            console.log('Added hidden column to portfolio_items');
           }
         });
       }
@@ -360,22 +371,22 @@ const portfolioItems = {
   },
   create: async (item) => {
     const result = await dbAsync.run(
-      'INSERT INTO portfolio_items (title, category, tag, shortDesc, fullDesc, img, images, videoUrl, type, color, bgGlow, sortOrder) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO portfolio_items (title, category, tag, shortDesc, fullDesc, img, images, videoUrl, type, color, bgGlow, hidden, sortOrder) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       [
         item.title, item.category, item.tag, item.shortDesc, item.fullDesc,
         item.img, item.images ? JSON.stringify(item.images) : null, 
-        item.videoUrl, item.type, item.color, item.bgGlow, item.sortOrder
+        item.videoUrl, item.type, item.color, item.bgGlow, item.hidden ? 1 : 0, item.sortOrder
       ]
     );
     return { id: result.lastID, ...item };
   },
   update: async (id, item) => {
     await dbAsync.run(
-      'UPDATE portfolio_items SET title=?, category=?, tag=?, shortDesc=?, fullDesc=?, img=?, images=?, videoUrl=?, type=?, color=?, bgGlow=?, sortOrder=?, updatedAt=CURRENT_TIMESTAMP WHERE id=?',
+      'UPDATE portfolio_items SET title=?, category=?, tag=?, shortDesc=?, fullDesc=?, img=?, images=?, videoUrl=?, type=?, color=?, bgGlow=?, hidden=?, sortOrder=?, updatedAt=CURRENT_TIMESTAMP WHERE id=?',
       [
         item.title, item.category, item.tag, item.shortDesc, item.fullDesc,
         item.img, item.images ? JSON.stringify(item.images) : null,
-        item.videoUrl, item.type, item.color, item.bgGlow, item.sortOrder, id
+        item.videoUrl, item.type, item.color, item.bgGlow, item.hidden ? 1 : 0, item.sortOrder, id
       ]
     );
     return { id, ...item };

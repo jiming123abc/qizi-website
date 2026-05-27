@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { 
   Plus, 
   Edit2, 
@@ -75,6 +75,8 @@ export function PortfolioAdmin() {
   const [pendingCompressionFailedUrl, setPendingCompressionFailedUrl] = useState<string | null>(null);
   const [pendingForceLocal, setPendingForceLocal] = useState(false);
 
+  const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
+
   const [formData, setFormData] = useState({
     title: '',
     category: '',
@@ -90,12 +92,13 @@ export function PortfolioAdmin() {
     hidden: false
   });
 
-  const qrCodeUrl = useMemo(() => {
-    if (editingItem) {
-      return generateQRCode(`${window.location.origin}?id=${editingItem.id}`, 128);
+  useEffect(() => {
+    if (editingItem && formData.hidden) {
+      generateQRCode(`${window.location.origin}?id=${editingItem.id}`, 128).then(setQrCodeUrl);
+    } else {
+      setQrCodeUrl('');
     }
-    return '';
-  }, [editingItem]);
+  }, [editingItem, formData.hidden]);
   const [additionalImagesUploading, setAdditionalImagesUploading] = useState(false);
 
   useEffect(() => {
