@@ -551,8 +551,9 @@ app.post('/api/oss/presign', async (req, res) => {
 
 // 使用内存存储上传进度（生产环境可以使用Redis）
 const uploadProgressStore = new Map();
+const videoTasks = new Map(); // 任务id -> 状态对象
 
-// 视频上传接口
+// 视频上传接口 (异步模式)
 app.post('/api/upload/video', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
@@ -568,94 +569,180 @@ app.post('/api/upload/video', upload.single('file'), async (req, res) => {
     const fileName = req.file.filename;
     const filePath = req.file.path;
     const shouldCompress = req.query.compress === 'true';
-
-    let fileUrl = '';
-    let compressed = false;
-    let compressionFailed = false;
-    let originalSizeKB = 0;
-    let compressedSizeKB = 0;
-
-    // 检查是否强制使用本地存储（用于 OSS 失败后用户确认的情况）
     const forceLocalStorage = req.query.forceLocal === 'true';
+    const taskId = Date.now() + '-' + Math.random().toString(36).substr(2, 9);
 
-    // 如果请求压缩，先读取文件并进行服务端压缩
-    let fileToUpload = filePath;
-    let fileBufferToUpload = null;
-    if (shouldCompress) {
+    // 立即初始化任务状态
+    videoTasks.set(taskId, {
+      status: 'processing',
+      progress: 0,
+      compressProgress: 0,
+      uploadProgress: 0,
+      message: '文件上传完成，正在处理中...',
+      result: null,
+      error: null,
+      filePath,
+      fileName,
+      shouldCompress,
+      forceLocalStorage,
+      createdAt: Date.now()
+    });
+
+    // 立即返回 taskId，不等处理完成
+    res.json({ taskId, status: 'queued' });
+
+    // 后台异步执行完整流程
+    (async () => {
       try {
-        const fileBuffer = fs.readFileSync(filePath);
-        originalSizeKB = Math.round(fileBuffer.length / 1024);
-        const bitrate = await getVideoBitrate(fileBuffer);
-        if (bitrate && bitrate > 2500) {
-          console.log(`服务端压缩开始: 码率 ${bitrate}kbps, 文件大小 ${originalSizeKB}KB`);
-          const compressedBuffer = await compressVideo(fileBuffer, 2500);
-          compressedSizeKB = Math.round(compressedBuffer.length / 1024);
-          if (compressedBuffer.length < fileBuffer.length) {
-            compressed = true;
-            fileBufferToUpload = compressedBuffer;
-            console.log(`服务端压缩完成: ${originalSizeKB}KB -> ${compressedSizeKB}KB`);
-          } else {
+        const task = videoTasks.get(taskId);
+        if (!task) return;
+
+        const { filePath, fileName, shouldCompress, forceLocalStorage } = task;
+        let fileUrl = '';
+        let compressed = false;
+        let compressionFailed = false;
+        let originalSizeKB = 0;
+        let compressedSizeKB = 0;
+
+        task.message = '正在检查文件...';
+        videoTasks.set(taskId, task);
+
+        // 如果请求压缩，先读取文件并进行服务端压缩
+        let fileToUpload = filePath;
+        let fileBufferToUpload = null;
+        if (shouldCompress) {
+          try {
+            const fileBuffer = fs.readFileSync(filePath);
+            originalSizeKB = Math.round(fileBuffer.length / 1024);
+            const bitrate = await getVideoBitrate(fileBuffer);
+            if (bitrate && bitrate > 2500) {
+              console.log(`服务端压缩开始: 码率 ${bitrate}kbps, 文件大小 ${originalSizeKB}KB`);
+              task.message = '正在压缩视频...';
+              task.compressProgress = 0;
+              videoTasks.set(taskId, task);
+
+              const compressedBuffer = await compressVideo(fileBuffer, 2500);
+              compressedSizeKB = Math.round(compressedBuffer.length / 1024);
+              if (compressedBuffer.length < fileBuffer.length) {
+                compressed = true;
+                fileBufferToUpload = compressedBuffer;
+                task.compressProgress = 100;
+                console.log(`服务端压缩完成: ${originalSizeKB}KB -> ${compressedSizeKB}KB`);
+              } else {
+                compressionFailed = true;
+                fileBufferToUpload = fileBuffer;
+                console.log(`服务端压缩未减小文件，使用原始文件`);
+              }
+            } else {
+              fileBufferToUpload = fileBuffer;
+            }
+            task.progress = 50;
+            videoTasks.set(taskId, task);
+          } catch (compressError) {
+            console.warn('服务端压缩出错:', compressError.message);
             compressionFailed = true;
-            fileBufferToUpload = fileBuffer;
-            console.log(`服务端压缩未减小文件，使用原始文件`);
+            try {
+              fileBufferToUpload = fs.readFileSync(filePath);
+            } catch (e) {
+              fileBufferToUpload = null;
+            }
           }
         } else {
-          fileBufferToUpload = fileBuffer;
-        }
-      } catch (compressError) {
-        console.warn('服务端压缩出错:', compressError.message);
-        compressionFailed = true;
-        try {
           fileBufferToUpload = fs.readFileSync(filePath);
-        } catch (e) {
-          // 读取失败，使用文件路径
-          fileBufferToUpload = null;
         }
-      }
-    }
 
-    if (isOSSConfigured && !forceLocalStorage && ossClient) {
-      try {
-        const ossFileName = `videos/${fileName}`;
-        let result;
-        if (fileBufferToUpload) {
-          result = await ossClient.put(ossFileName, fileBufferToUpload);
+        task.message = '正在上传到存储...';
+        task.progress = 75;
+        videoTasks.set(taskId, task);
+
+        if (isOSSConfigured && !forceLocalStorage && ossClient) {
+          try {
+            const ossFileName = `videos/${fileName}`;
+            let result;
+            if (fileBufferToUpload) {
+              result = await ossClient.put(ossFileName, fileBufferToUpload);
+            } else {
+              result = await ossClient.put(ossFileName, filePath);
+            }
+            fileUrl = result.url;
+            fs.unlinkSync(filePath);
+            console.log('使用 OSS 上传视频成功');
+          } catch (ossError) {
+            console.warn('OSS 上传失败:', ossError.message);
+            try { fs.unlinkSync(filePath); } catch (e) {}
+            // 更新任务状态为错误
+            const finalTask = videoTasks.get(taskId);
+            if (finalTask) {
+              finalTask.status = 'failed';
+              finalTask.error = 'OSS 上传失败';
+              finalTask.ossError = true;
+              finalTask.message = '阿里云 OSS 上传失败';
+              videoTasks.set(taskId, finalTask);
+            }
+            return;
+          }
         } else {
-          result = await ossClient.put(ossFileName, filePath);
+          if (fileBufferToUpload && compressed) {
+            fs.writeFileSync(filePath, fileBufferToUpload);
+          }
+          fileUrl = `/uploads/videos/${fileName}`;
+          console.log('使用本地存储视频');
         }
-        fileUrl = result.url;
-        fs.unlinkSync(filePath);
-        console.log('使用 OSS 上传视频成功');
-      } catch (ossError) {
-        console.warn('OSS 上传失败:', ossError.message);
-        try { fs.unlinkSync(filePath); } catch (e) {}
-        return res.status(500).json({ 
-          error: 'OSS 上传失败', 
-          ossError: true,
-          message: '阿里云 OSS 上传失败，是否要上传到本地存储？'
-        });
-      }
-    } else {
-      if (fileBufferToUpload && compressed) {
-        fs.writeFileSync(filePath, fileBufferToUpload);
-      }
-      fileUrl = `/uploads/videos/${fileName}`;
-      console.log('使用本地存储视频');
-    }
 
-    res.json({ 
-      url: fileUrl,
-      compressed,
-      compressionFailed,
-      originalSizeKB,
-      compressedSizeKB
-    });
+        task.uploadProgress = 100;
+        task.progress = 100;
+        task.status = 'completed';
+        task.message = '上传完成';
+        task.result = {
+          url: fileUrl,
+          compressed,
+          compressionFailed,
+          originalSizeKB,
+          compressedSizeKB
+        };
+        videoTasks.set(taskId, task);
+
+      } catch (error) {
+        console.error('后台处理失败:', error);
+        const task = videoTasks.get(taskId);
+        if (task) {
+          task.status = 'failed';
+          task.error = '处理失败: ' + error.message;
+          task.message = '处理失败';
+          if (task.filePath && fs.existsSync(task.filePath)) {
+            try { fs.unlinkSync(task.filePath); } catch (e) {}
+          }
+          videoTasks.set(taskId, task);
+        }
+      }
+    })();
+
   } catch (error) {
     console.error('上传失败:', error);
     if (req.file && req.file.path) {
       try { fs.unlinkSync(req.file.path); } catch (e) {}
     }
     res.status(500).json({ error: '上传失败: ' + error.message });
+  }
+});
+
+// 获取视频任务状态接口
+app.get('/api/upload/video/status/:taskId', (req, res) => {
+  const { taskId } = req.params;
+  const task = videoTasks.get(taskId);
+
+  if (!task) {
+    return res.status(404).json({ error: '任务不存在或已过期' });
+  }
+
+  res.json(task);
+
+  // 完成后可以清理任务（比如保留15分钟）
+  if (task.status === 'completed' || task.status === 'failed') {
+    const age = Date.now() - task.createdAt;
+    if (age > 900000) { // 15分钟
+      videoTasks.delete(taskId);
+    }
   }
 });
 
