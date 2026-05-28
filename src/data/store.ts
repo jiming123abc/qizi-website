@@ -88,13 +88,17 @@ async function apiPost<T, Body = unknown>(endpoint: string, body: Body, errorMes
 }
 
 // 通用 PUT 请求
-async function apiPut<Body = unknown>(endpoint: string, body: Body, errorMessage: string): Promise<void> {
+async function apiPut<T = void, Body = unknown>(endpoint: string, body: Body, errorMessage: string): Promise<T> {
   const res = await fetch(`${API_BASE}/${endpoint}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body)
   });
   if (!res.ok) throw new Error(errorMessage);
+  if (res.headers.get('content-length') !== '0' && res.headers.get('content-type')?.includes('application/json')) {
+    return res.json() as Promise<T>;
+  }
+  return undefined as T;
 }
 
 // 通用 DELETE 请求
@@ -130,7 +134,8 @@ export async function addPortfolioItem(item: Omit<PortfolioItem, 'id'>): Promise
 }
 
 export async function updatePortfolioItemsSortOrder(items: PortfolioItem[]): Promise<void> {
-  return savePortfolioItems(items);
+  const sortData = items.map(item => ({ id: item.id, sortOrder: item.sortOrder }));
+  return apiPut('portfolio-items/sort', sortData, 'Failed to update portfolio items sort order');
 }
 
 export async function updatePortfolioItem(item: PortfolioItem): Promise<void> {
@@ -238,5 +243,6 @@ export async function deleteCategoryWithDetails(id: string): Promise<void> {
 }
 
 export async function updateCategoriesSortOrder(categories: CategoryWithDetails[]): Promise<void> {
-  return saveCategoriesWithDetails(categories);
+  const sortData = categories.map(cat => ({ id: cat.id, sortOrder: cat.sortOrder }));
+  return apiPut('categories-details/sort', sortData, 'Failed to update categories sort order');
 }

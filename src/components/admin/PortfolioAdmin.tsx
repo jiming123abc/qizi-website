@@ -124,7 +124,7 @@ export function PortfolioAdmin() {
     }
   };
 
-  const handleMoveUp = (id: number) => {
+  const handleMoveUp = async (id: number) => {
     const sortedItems = [...items].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
     const index = sortedItems.findIndex(i => i.id === id);
     if (index > 0) {
@@ -134,12 +134,17 @@ export function PortfolioAdmin() {
       sortedItems.forEach((item, i) => {
         item.sortOrder = i + 1;
       });
-      updatePortfolioItemsSortOrder(sortedItems);
-      setItems(sortedItems);
+      try {
+        await updatePortfolioItemsSortOrder(sortedItems);
+        setItems(sortedItems);
+      } catch (error) {
+        console.error('排序失败:', error);
+        alert('排序失败，请重试');
+      }
     }
   };
 
-  const handleMoveDown = (id: number) => {
+  const handleMoveDown = async (id: number) => {
     const sortedItems = [...items].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
     const index = sortedItems.findIndex(i => i.id === id);
     if (index < sortedItems.length - 1) {
@@ -149,8 +154,13 @@ export function PortfolioAdmin() {
       sortedItems.forEach((item, i) => {
         item.sortOrder = i + 1;
       });
-      updatePortfolioItemsSortOrder(sortedItems);
-      setItems(sortedItems);
+      try {
+        await updatePortfolioItemsSortOrder(sortedItems);
+        setItems(sortedItems);
+      } catch (error) {
+        console.error('排序失败:', error);
+        alert('排序失败，请重试');
+      }
     }
   };
 
@@ -164,7 +174,7 @@ export function PortfolioAdmin() {
     setDragOverIndex(index);
   };
 
-  const handleDrop = (e: React.DragEvent, targetIndex: number) => {
+  const handleDrop = async (e: React.DragEvent, targetIndex: number) => {
     e.preventDefault();
     if (draggedItem === null) return;
 
@@ -177,8 +187,13 @@ export function PortfolioAdmin() {
       sortedItems.forEach((item, i) => {
         item.sortOrder = i + 1;
       });
-      updatePortfolioItemsSortOrder(sortedItems);
-      setItems(sortedItems);
+      try {
+        await updatePortfolioItemsSortOrder(sortedItems);
+        setItems(sortedItems);
+      } catch (error) {
+        console.error('排序失败:', error);
+        alert('排序失败，请重试');
+      }
     }
 
     setDraggedItem(null);

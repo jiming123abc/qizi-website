@@ -779,6 +779,16 @@ app.post('/api/portfolio-items', async (req, res) => {
   }
 });
 
+app.put('/api/portfolio-items/sort', async (req, res) => {
+  try {
+    const result = await db.portfolioItems.updateSort(req.body);
+    res.json(result);
+  } catch (error) {
+    console.error('Update portfolio sort error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.put('/api/portfolio-items/:id', async (req, res) => {
   try {
     const id = parseInt(req.params.id);
@@ -824,6 +834,16 @@ app.post('/api/categories-details', async (req, res) => {
     res.json(newCategory);
   } catch (error) {
     console.error('Create category details error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/categories-details/sort', async (req, res) => {
+  try {
+    const result = await db.categoriesDetails.updateSort(req.body);
+    res.json(result);
+  } catch (error) {
+    console.error('Update categories sort error:', error);
     res.status(500).json({ error: error.message });
   }
 });

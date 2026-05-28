@@ -391,6 +391,15 @@ const portfolioItems = {
     );
     return { id, ...item };
   },
+  updateSort: async (items) => {
+    for (const item of items) {
+      await dbAsync.run(
+        'UPDATE portfolio_items SET sortOrder=?, updatedAt=CURRENT_TIMESTAMP WHERE id=?',
+        [item.sortOrder, item.id]
+      );
+    }
+    return items;
+  },
   delete: async (id) => {
     // 先删除精选作品表中的相关记录
     await dbAsync.run('DELETE FROM featured_works WHERE portfolioId=?', [id]);
@@ -544,6 +553,15 @@ const categoriesDetails = {
     }
     
     return { id, ...category };
+  },
+  updateSort: async (categories) => {
+    for (const cat of categories) {
+      await dbAsync.run(
+        'UPDATE categories_details SET sortOrder=?, updatedAt=CURRENT_TIMESTAMP WHERE id=?',
+        [cat.sortOrder, cat.id]
+      );
+    }
+    return categories;
   },
   delete: async (id) => {
     // 先获取要删除的分类的名称

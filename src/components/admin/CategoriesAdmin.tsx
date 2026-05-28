@@ -1,6 +1,6 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿import { useState, useEffect } from 'react';
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿import { useState, useEffect } from 'react';
 import { Plus, GripVertical, ChevronUp, ChevronDown, Edit2, Trash2, Image, AlertCircle, Upload, Link as LinkIcon, Save, X } from 'lucide-react';
-import { getCategoriesWithDetails, addCategoryWithDetails, updateCategoryDetails, deleteCategoryWithDetails, CategoryWithDetails } from '../../data/store';
+import { getCategoriesWithDetails, addCategoryWithDetails, updateCategoryDetails, deleteCategoryWithDetails, CategoryWithDetails, updateCategoriesSortOrder } from '../../data/store';
 import { uploadImage } from '../../lib/ossUtils';
 
 export function CategoriesAdmin() {
@@ -118,23 +118,29 @@ export function CategoriesAdmin() {
     setDragOverIndex(index);
   };
 
-  const handleDrop = (e: React.DragEvent, targetIndex: number) => {
+  const handleDrop = async (e: React.DragEvent, targetIndex: number) => {
     e.preventDefault();
-    if (draggedItem && dragOverIndex !== null) {
-      const item = categories.find(c => c.id === draggedItem);
-      if (item) {
-        const newCategories = [...categories];
-        const currentIndex = newCategories.findIndex(c => c.id === draggedItem);
-        newCategories.splice(currentIndex, 1);
-        newCategories.splice(targetIndex, 0, item);
-        
-        newCategories.forEach((cat, index) => {
-          updateCategoryDetails(cat.id, { sortOrder: index + 1 });
-        });
-        
+    if (!draggedItem) return;
+
+    const newCategories = [...categories];
+    const draggedIndex = newCategories.findIndex(c => c.id === draggedItem);
+    
+    if (draggedIndex !== targetIndex) {
+      const draggedCategory = newCategories.splice(draggedIndex, 1)[0];
+      newCategories.splice(targetIndex, 0, draggedCategory);
+      newCategories.forEach((cat, idx) => {
+        cat.sortOrder = idx + 1;
+      });
+      
+      try {
+        await updateCategoriesSortOrder(newCategories);
         setCategories(newCategories);
+      } catch (error) {
+        console.error('排序失败:', error);
+        alert('排序失败，请重试');
       }
     }
+
     setDraggedItem(null);
     setDragOverIndex(null);
   };
@@ -144,27 +150,43 @@ export function CategoriesAdmin() {
     setDragOverIndex(null);
   };
 
-  const handleMoveUp = (id: string) => {
-    const index = categories.findIndex(c => c.id === id);
+  const handleMoveUp = async (id: string) => {
+    const newCategories = [...categories];
+    const index = newCategories.findIndex(c => c.id === id);
     if (index > 0) {
-      const newCategories = [...categories];
-      [newCategories[index], newCategories[index - 1]] = [newCategories[index - 1], newCategories[index]];
+      const temp = newCategories[index];
+      newCategories[index] = newCategories[index - 1];
+      newCategories[index - 1] = temp;
       newCategories.forEach((cat, idx) => {
-        updateCategoryDetails(cat.id, { sortOrder: idx + 1 });
+        cat.sortOrder = idx + 1;
       });
-      setCategories(newCategories);
+      try {
+        await updateCategoriesSortOrder(newCategories);
+        setCategories(newCategories);
+      } catch (error) {
+        console.error('排序失败:', error);
+        alert('排序失败，请重试');
+      }
     }
   };
 
-  const handleMoveDown = (id: string) => {
-    const index = categories.findIndex(c => c.id === id);
-    if (index < categories.length - 1) {
-      const newCategories = [...categories];
-      [newCategories[index], newCategories[index + 1]] = [newCategories[index + 1], newCategories[index]];
+  const handleMoveDown = async (id: string) => {
+    const newCategories = [...categories];
+    const index = newCategories.findIndex(c => c.id === id);
+    if (index < newCategories.length - 1) {
+      const temp = newCategories[index];
+      newCategories[index] = newCategories[index + 1];
+      newCategories[index + 1] = temp;
       newCategories.forEach((cat, idx) => {
-        updateCategoryDetails(cat.id, { sortOrder: idx + 1 });
+        cat.sortOrder = idx + 1;
       });
-      setCategories(newCategories);
+      try {
+        await updateCategoriesSortOrder(newCategories);
+        setCategories(newCategories);
+      } catch (error) {
+        console.error('排序失败:', error);
+        alert('排序失败，请重试');
+      }
     }
   };
 
