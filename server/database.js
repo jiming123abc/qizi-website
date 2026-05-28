@@ -220,28 +220,7 @@ function insertInitialData() {
         }
       );
     } else {
-      const defaultSlides = [
-        { id: 1, img: '/images/hero-video.png', label: 'Neural Stream', title: 'Ethereal Segment 01' },
-        { id: 2, img: '/images/ai-digital-human.png', label: 'Digital Human', title: 'Avatar Segment 02' },
-        { id: 3, img: '/images/ai-film-production.png', label: 'Film Production', title: 'Cinematic Segment 03' }
-      ];
-
-      db.run(
-        'UPDATE home_content SET heroTitle = ?, heroGradientTitle = ?, heroSubtitle = ?, heroSlides = ?, heroImage = ?, shareTitle = ?, shareDescription = ?, updatedAt = CURRENT_TIMESTAMP WHERE id = 1',
-        [
-          '开启未来的',
-          '视界 Matrix',
-          '通过 AIGC 重新定义数字影像。我们将人类的情感与神经计算相结合，打造跨越维度的奇迹。',
-          JSON.stringify(defaultSlides),
-          '/images/hero-home.png',
-          '大连柒子文化发展有限公司',
-          '诚信立足 创新致远'
-        ],
-        (err) => {
-          if (err) console.error('Error updating home_content:', err);
-          else console.log('Home content updated to match online site');
-        }
-      );
+      console.log('Home content already exists, skipping initialization');
     }
   });
 

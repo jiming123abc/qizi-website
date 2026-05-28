@@ -1039,6 +1039,14 @@ app.get('*', async (req, res) => {
     const distIndexPath = path.join(__dirname, '../dist/index.html');
     let html = fs.readFileSync(distIndexPath, 'utf-8');
     
+    // 获取首页内容用于默认 meta 标签
+    let homeContent = null;
+    try {
+      homeContent = await db.homeContent.get();
+    } catch (e) {
+      console.warn('获取首页内容失败:', e);
+    }
+    
     // 检查是否有 id 参数
     const id = req.query.id;
     if (id) {
@@ -1048,14 +1056,6 @@ app.get('*', async (req, res) => {
         const item = items.find(i => i.id.toString() === id.toString());
         
         if (item) {
-          // 获取首页默认内容作为 fallback
-          let homeContent = null;
-          try {
-            homeContent = await db.homeContent.get();
-          } catch (e) {
-            console.warn('获取首页内容失败:', e);
-          }
-          
           const title = item.title || (homeContent?.shareTitle || '大连柒子文化发展有限公司');
           const description = item.shortDesc || item.fullDesc || item.category || (homeContent?.shareDescription || '诚信立足 创新致远');
           const image = item.img || (homeContent?.heroImage || '/images/hero-home.png');
@@ -1081,6 +1081,29 @@ app.get('*', async (req, res) => {
       } catch (itemErr) {
         console.warn('获取作品信息失败，使用默认 meta 标签:', itemErr);
       }
+    } else {
+      // 首页：使用数据库中的配置更新默认 meta 标签
+      const title = homeContent?.shareTitle || '大连柒子文化发展有限公司';
+      const description = homeContent?.shareDescription || '诚信立足 创新致远';
+      const image = homeContent?.heroImage || '/images/hero-home.png';
+      const url = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
+      
+      // 替换 meta 标签
+      html = html
+        .replace(/<meta property="og:title" content="[^"]*" \/>/, `<meta property="og:title" content="${escapeHtml(title)}" />`)
+        .replace(/<meta property="og:description" content="[^"]*" \/>/, `<meta property="og:description" content="${escapeHtml(description)}" />`)
+        .replace(/<meta property="og:image" content="[^"]*" \/>/, `<meta property="og:image" content="${getFullImageUrl(image, req)}" />`)
+        .replace(/<meta property="og:url" content="[^"]*" \/>/, `<meta property="og:url" content="${escapeHtml(url)}" />`)
+        .replace(/<meta name="description" content="[^"]*" \/>/, `<meta name="description" content="${escapeHtml(description)}" />`)
+        .replace(/<meta name="wechat:title" content="[^"]*" \/>/, `<meta name="wechat:title" content="${escapeHtml(title)}" />`)
+        .replace(/<meta name="wechat:description" content="[^"]*" \/>/, `<meta name="wechat:description" content="${escapeHtml(description)}" />`)
+        .replace(/<meta name="wechat:image" content="[^"]*" \/>/, `<meta name="wechat:image" content="${getFullImageUrl(image, req)}" />`)
+        .replace(/<meta name="twitter:title" content="[^"]*" \/>/, `<meta name="twitter:title" content="${escapeHtml(title)}" />`)
+        .replace(/<meta name="twitter:description" content="[^"]*" \/>/, `<meta name="twitter:description" content="${escapeHtml(description)}" />`)
+        .replace(/<meta name="twitter:image" content="[^"]*" \/>/, `<meta name="twitter:image" content="${getFullImageUrl(image, req)}" />`)
+        .replace(/<title>[^<]*<\/title>/, `<title>${escapeHtml(title)}</title>`);
+      
+      console.log('为首页渲染了自定义 meta 标签');
     }
     
     res.send(html);
