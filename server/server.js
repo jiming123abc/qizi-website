@@ -615,13 +615,13 @@ app.post('/api/upload/video', upload.single('file'), async (req, res) => {
             const fileBuffer = fs.readFileSync(filePath);
             originalSizeKB = Math.round(fileBuffer.length / 1024);
             const bitrate = await getVideoBitrate(fileBuffer);
-            if (bitrate && bitrate > 2500) {
+            if (bitrate && bitrate > 2000) {
               console.log(`服务端压缩开始: 码率 ${bitrate}kbps, 文件大小 ${originalSizeKB}KB`);
               task.message = '正在压缩视频...';
               task.compressProgress = 0;
               videoTasks.set(taskId, task);
 
-              const compressedBuffer = await compressVideo(fileBuffer, 2500);
+              const compressedBuffer = await compressVideo(fileBuffer, 2000);
               compressedSizeKB = Math.round(compressedBuffer.length / 1024);
               if (compressedBuffer.length < fileBuffer.length) {
                 compressed = true;

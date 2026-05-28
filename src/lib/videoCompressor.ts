@@ -21,7 +21,7 @@ export type VideoBitrateInfo = {
   duration: number | null;
 };
 
-const TARGET_BITRATE_KBPS = 2500;
+const TARGET_BITRATE_KBPS = 2000;
 const FFMPEG_BASE = '/ffmpeg';
 const UMD_SCRIPT_URL = `${FFMPEG_BASE}/ffmpeg.umd.js`;
 const CORE_JS_URL = `${FFMPEG_BASE}/ffmpeg-core.js`;
