@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Save, Image, Link, FileImage, Loader2, Plus, X } from 'lucide-react';
+import { Save, Image, Link, FileImage, Loader2, Plus, X, Check, AlertCircle } from 'lucide-react';
 import { getHomeContent, saveHomeContent, HomeContent } from '../../data/store';
 import { uploadImage, UploadError } from '../../lib/ossUtils';
 
@@ -17,6 +17,11 @@ export function HomeContentAdmin() {
   const [isLoading, setIsLoading] = useState(false);
   const [editingSlideIndex, setEditingSlideIndex] = useState<number | null>(null);
   const [slideImageSource, setSlideImageSource] = useState<'upload' | 'url'>('upload');
+  const [imageUploadStatus, setImageUploadStatus] = useState({
+    phase: 'idle' as 'idle' | 'uploading' | 'done',
+    progress: 0,
+    message: ''
+  });
 
   useEffect(() => {
     const loadContent = async () => {
@@ -33,8 +38,19 @@ export function HomeContentAdmin() {
 
   const handleImageUpload = async (file: File, slideIndex?: number, isHeroImage?: boolean, forceLocal: boolean = false) => {
     setIsLoading(true);
+    const fileSizeKB = (file.size / 1024).toFixed(1);
+    
+    setImageUploadStatus({ 
+      phase: 'uploading', 
+      progress: 0, 
+      message: `正在上传图片 (${fileSizeKB}KB)...` 
+    });
+
     try {
-      const result = await uploadImage(file, undefined, forceLocal);
+      const result = await uploadImage(file, (progress) => {
+        setImageUploadStatus({ ...progress, phase: progress.phase === 'uploading' ? 'uploading' : 'uploading' });
+      }, forceLocal);
+      
       const url = result.url;
       if (isHeroImage) {
         setContent(prev => ({ ...prev, heroImage: url }));
@@ -43,8 +59,20 @@ export function HomeContentAdmin() {
         newSlides[slideIndex] = { ...newSlides[slideIndex], img: url };
         setContent(prev => ({ ...prev, heroSlides: newSlides }));
       }
+      
+      setImageUploadStatus(prev => ({ 
+        ...prev,
+        phase: 'done', 
+        progress: 100 
+      }));
     } catch (error) {
       const uploadError = error as UploadError;
+      setImageUploadStatus({ 
+        phase: 'done', 
+        progress: 0, 
+        message: `上传失败: ${uploadError.message}` 
+      });
+      
       if (uploadError.ossError) {
         const useLocal = confirm(
           `${uploadError.message}\n\n是否使用本地存储？`
@@ -199,31 +227,69 @@ export function HomeContentAdmin() {
                         </div>
 
                         {slideImageSource === 'upload' && (
-                          slide.img ? (
-                            <div className="relative rounded-lg overflow-hidden border border-white/10">
-                              <img src={slide.img} alt={`Slide ${index + 1}`} className="w-full h-32 object-cover" />
-                              <button
-                                onClick={() => updateSlide(index, 'img', '')}
-                                className="absolute top-1 right-1 p-1 rounded bg-black/50 text-white hover:bg-black/70 transition-colors"
-                              >
-                                <X className="w-3 h-3" />
-                              </button>
-                            </div>
-                          ) : (
-                            <label className="flex flex-col items-center justify-center w-full h-32 rounded-lg border-2 border-dashed border-white/20 cursor-pointer hover:border-primary/50 transition-colors">
-                              <FileImage className="w-6 h-6 text-on-surface-variant mb-1" />
-                              <span className="text-xs text-on-surface-variant">上传图片</span>
-                              <input
-                                type="file"
-                                accept="image/jpeg,image/png,image/webp"
-                                onChange={(e) => {
-                                  const file = e.target.files?.[0];
-                                  if (file) handleImageUpload(file, index);
-                                }}
-                                className="hidden"
-                              />
-                            </label>
-                          )
+                          <>
+                            {slide.img ? (
+                              <div className="relative rounded-lg overflow-hidden border border-white/10">
+                                <img src={slide.img} alt={`Slide ${index + 1}`} className="w-full h-32 object-cover" />
+                                <button
+                                  onClick={() => updateSlide(index, 'img', '')}
+                                  className="absolute top-1 right-1 p-1 rounded bg-black/50 text-white hover:bg-black/70 transition-colors"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              </div>
+                            ) : (
+                              <label className="flex flex-col items-center justify-center w-full h-32 rounded-lg border-2 border-dashed border-white/20 cursor-pointer hover:border-primary/50 transition-colors">
+                                <FileImage className="w-6 h-6 text-on-surface-variant mb-1" />
+                                <span className="text-xs text-on-surface-variant">上传图片</span>
+                                <input
+                                  type="file"
+                                  accept="image/jpeg,image/png,image/webp"
+                                  onChange={(e) => {
+                                    const file = e.target.files?.[0];
+                                    if (file) handleImageUpload(file, index);
+                                  }}
+                                  className="hidden"
+                                />
+                              </label>
+                            )}
+                            
+                            {imageUploadStatus.phase !== 'idle' && editingSlideIndex === index && (
+                              <div className="mt-3 p-4 rounded-xl bg-surface-container border border-white/10">
+                                <div className="flex items-start gap-3">
+                                  {imageUploadStatus.phase === 'uploading' && imageUploadStatus.progress < 100 && (
+                                    <Loader2 className="w-4 h-4 text-secondary animate-spin mt-0.5 flex-shrink-0" />
+                                  )}
+                                  {imageUploadStatus.phase === 'done' && imageUploadStatus.message.includes('失败') && (
+                                    <AlertCircle className="w-4 h-4 text-red-400 mt-0.5 flex-shrink-0" />
+                                  )}
+                                  {imageUploadStatus.phase === 'done' && !imageUploadStatus.message.includes('失败') && (
+                                    <Check className="w-4 h-4 text-green-400 mt-0.5 flex-shrink-0" />
+                                  )}
+                                  <div className="flex-1">
+                                    <div className={`text-sm whitespace-pre-line ${imageUploadStatus.message.includes('失败') ? 'text-red-400' : 'text-on-surface-variant'}`}>
+                                      {imageUploadStatus.message}
+                                    </div>
+                                    {imageUploadStatus.phase !== 'done' && imageUploadStatus.progress > 0 && (
+                                      <div className="text-xs text-on-surface-variant/70 mt-1">
+                                        进度：{imageUploadStatus.progress}%
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                                {imageUploadStatus.phase !== 'done' && (
+                                  <div className="mt-3">
+                                    <div className="w-full bg-white/5 rounded-full h-3 overflow-hidden">
+                                      <div 
+                                        className="h-full rounded-full bg-gradient-to-r from-primary to-secondary transition-all duration-300"
+                                        style={{ width: `${imageUploadStatus.progress}%` }}
+                                      />
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </>
                         )}
 
                         {slideImageSource === 'url' && (
@@ -348,31 +414,69 @@ export function HomeContentAdmin() {
                 </div>
 
                 {heroImageSource === 'upload' && (
-                  content.heroImage ? (
-                    <div className="relative rounded-lg overflow-hidden border border-white/10">
-                      <img src={content.heroImage} alt="分享缩略图" className="w-full h-32 object-cover" />
-                      <button
-                        onClick={() => setContent(prev => ({ ...prev, heroImage: '' }))}
-                        className="absolute top-1 right-1 p-1 rounded bg-black/50 text-white hover:bg-black/70 transition-colors"
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
-                    </div>
-                  ) : (
-                    <label className="flex flex-col items-center justify-center w-full h-32 rounded-lg border-2 border-dashed border-white/20 cursor-pointer hover:border-primary/50 transition-colors">
-                      <FileImage className="w-6 h-6 text-on-surface-variant mb-1" />
-                      <span className="text-xs text-on-surface-variant">上传分享缩略图</span>
-                      <input
-                        type="file"
-                        accept="image/jpeg,image/png,image/webp"
-                        onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (file) handleImageUpload(file, undefined, true);
-                        }}
-                        className="hidden"
-                      />
-                    </label>
-                  )
+                  <>
+                    {content.heroImage ? (
+                      <div className="relative rounded-lg overflow-hidden border border-white/10">
+                        <img src={content.heroImage} alt="分享缩略图" className="w-full h-32 object-cover" />
+                        <button
+                          onClick={() => setContent(prev => ({ ...prev, heroImage: '' }))}
+                          className="absolute top-1 right-1 p-1 rounded bg-black/50 text-white hover:bg-black/70 transition-colors"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ) : (
+                      <label className="flex flex-col items-center justify-center w-full h-32 rounded-lg border-2 border-dashed border-white/20 cursor-pointer hover:border-primary/50 transition-colors">
+                        <FileImage className="w-6 h-6 text-on-surface-variant mb-1" />
+                        <span className="text-xs text-on-surface-variant">上传分享缩略图</span>
+                        <input
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) handleImageUpload(file, undefined, true);
+                          }}
+                          className="hidden"
+                        />
+                      </label>
+                    )}
+                    
+                    {imageUploadStatus.phase !== 'idle' && (
+                      <div className="mt-3 p-4 rounded-xl bg-surface-container border border-white/10">
+                        <div className="flex items-start gap-3">
+                          {imageUploadStatus.phase === 'uploading' && imageUploadStatus.progress < 100 && (
+                            <Loader2 className="w-4 h-4 text-secondary animate-spin mt-0.5 flex-shrink-0" />
+                          )}
+                          {imageUploadStatus.phase === 'done' && imageUploadStatus.message.includes('失败') && (
+                            <AlertCircle className="w-4 h-4 text-red-400 mt-0.5 flex-shrink-0" />
+                          )}
+                          {imageUploadStatus.phase === 'done' && !imageUploadStatus.message.includes('失败') && (
+                            <Check className="w-4 h-4 text-green-400 mt-0.5 flex-shrink-0" />
+                          )}
+                          <div className="flex-1">
+                            <div className={`text-sm whitespace-pre-line ${imageUploadStatus.message.includes('失败') ? 'text-red-400' : 'text-on-surface-variant'}`}>
+                              {imageUploadStatus.message}
+                            </div>
+                            {imageUploadStatus.phase !== 'done' && imageUploadStatus.progress > 0 && (
+                              <div className="text-xs text-on-surface-variant/70 mt-1">
+                                进度：{imageUploadStatus.progress}%
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        {imageUploadStatus.phase !== 'done' && (
+                          <div className="mt-3">
+                            <div className="w-full bg-white/5 rounded-full h-3 overflow-hidden">
+                              <div 
+                                className="h-full rounded-full bg-gradient-to-r from-primary to-secondary transition-all duration-300"
+                                style={{ width: `${imageUploadStatus.progress}%` }}
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </>
                 )}
 
                 {heroImageSource === 'url' && (

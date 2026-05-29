@@ -115,6 +115,19 @@ export function PortfolioAdmin() {
     }
   };
 
+  // 监听分类加载完成，设置默认分类
+  useEffect(() => {
+    if (categories.length > 0 && viewMode === 'create') {
+      // 只在分类已加载且是创建模式时更新 formData.category
+      if (!formData.category) {
+        setFormData(prev => ({
+          ...prev,
+          category: categories[0]
+        }));
+      }
+    }
+  }, [categories, viewMode]);
+
   const refreshItems = async () => {
     try {
       const allItems = await getPortfolioItems();
@@ -208,10 +221,9 @@ export function PortfolioAdmin() {
   const handleCreate = () => {
     setImgSourceType('upload');
     setVideoSourceType('upload');
-    const defaultCategory = selectedCategory === 'all' ? (categories[0] || '') : selectedCategory;
     setFormData({
       title: '',
-      category: defaultCategory,
+      category: '', // 暂时留空，等 categories 加载完成后由 useEffect 设置
       tag: '',
       shortDesc: '',
       fullDesc: '',
@@ -846,6 +858,15 @@ export function PortfolioAdmin() {
                     <p className="text-xs text-on-surface-variant/50 mt-1">
                       可从阿里云OSS获取图片地址，格式如：https://xxx.oss-cn-beijing.aliyuncs.com/xxx.jpg
                     </p>
+                    {formData.img && (
+                      <div className="mt-3 rounded-xl overflow-hidden border border-white/10">
+                        <img 
+                          src={formData.img} 
+                          alt="封面预览" 
+                          className="w-full h-48 object-cover" 
+                        />
+                      </div>
+                    )}
                   </>
                 )}
 
