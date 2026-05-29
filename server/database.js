@@ -370,6 +370,30 @@ const portfolioItems = {
     );
     return { id, ...item };
   },
+  put: async (item) => {
+    const id = item.id;
+    const existing = await dbAsync.get('SELECT id FROM portfolio_items WHERE id=?', [id]);
+    if (existing) {
+      await dbAsync.run(
+        'UPDATE portfolio_items SET title=?, category=?, tag=?, shortDesc=?, fullDesc=?, img=?, images=?, videoUrl=?, type=?, color=?, bgGlow=?, hidden=?, sortOrder=?, updatedAt=CURRENT_TIMESTAMP WHERE id=?',
+        [
+          item.title, item.category, item.tag, item.shortDesc, item.fullDesc,
+          item.img, item.images ? JSON.stringify(item.images) : null,
+          item.videoUrl, item.type, item.color, item.bgGlow, item.hidden ? 1 : 0, item.sortOrder, id
+        ]
+      );
+    } else {
+      await dbAsync.run(
+        'INSERT INTO portfolio_items (id, title, category, tag, shortDesc, fullDesc, img, images, videoUrl, type, color, bgGlow, hidden, sortOrder) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+          id, item.title, item.category, item.tag, item.shortDesc, item.fullDesc,
+          item.img, item.images ? JSON.stringify(item.images) : null,
+          item.videoUrl, item.type, item.color, item.bgGlow, item.hidden ? 1 : 0, item.sortOrder
+        ]
+      );
+    }
+    return item;
+  },
   updateSort: async (items) => {
     for (const item of items) {
       await dbAsync.run(
@@ -409,6 +433,22 @@ const featuredWorks = {
       'INSERT INTO featured_works (id, portfolioId, sortOrder) VALUES (?, ?, ?)',
       [work.id, work.portfolioId, work.sortOrder]
     );
+    return work;
+  },
+  put: async (work) => {
+    const id = work.id;
+    const existing = await dbAsync.get('SELECT id FROM featured_works WHERE id=?', [id]);
+    if (existing) {
+      await dbAsync.run(
+        'UPDATE featured_works SET portfolioId=?, sortOrder=? WHERE id=?',
+        [work.portfolioId, work.sortOrder, id]
+      );
+    } else {
+      await dbAsync.run(
+        'INSERT INTO featured_works (id, portfolioId, sortOrder) VALUES (?, ?, ?)',
+        [work.id, work.portfolioId, work.sortOrder]
+      );
+    }
     return work;
   },
   delete: async (id) => {
@@ -466,6 +506,9 @@ const homeContent = {
       ]
     );
     return content;
+  },
+  put: async (content) => {
+    return homeContent.update(content);
   }
 };
 
@@ -487,6 +530,22 @@ const teamMembers = {
       [member.name, member.role, member.avatar, member.bio, member.fullDesc, member.sortOrder, id]
     );
     return { id, ...member };
+  },
+  put: async (member) => {
+    const id = member.id;
+    const existing = await dbAsync.get('SELECT id FROM team_members WHERE id=?', [id]);
+    if (existing) {
+      await dbAsync.run(
+        'UPDATE team_members SET name=?, role=?, avatar=?, bio=?, fullDesc=?, sortOrder=?, updatedAt=CURRENT_TIMESTAMP WHERE id=?',
+        [member.name, member.role, member.avatar, member.bio, member.fullDesc, member.sortOrder, id]
+      );
+    } else {
+      await dbAsync.run(
+        'INSERT INTO team_members (id, name, role, avatar, bio, fullDesc, sortOrder) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [member.id, member.name, member.role, member.avatar, member.bio, member.fullDesc, member.sortOrder]
+      );
+    }
+    return member;
   },
   delete: async (id) => {
     await dbAsync.run('DELETE FROM team_members WHERE id=?', [id]);
@@ -532,6 +591,41 @@ const categoriesDetails = {
     }
     
     return { id, ...category };
+  },
+  put: async (category) => {
+    const id = category.id;
+    const existing = await dbAsync.get('SELECT id FROM categories_details WHERE id=?', [id]);
+    if (existing) {
+      // 先获取旧的分类名称
+      const oldCategory = await dbAsync.get('SELECT name FROM categories_details WHERE id=?', [id]);
+      const oldName = oldCategory?.name;
+      
+      // 更新分类
+      await dbAsync.run(
+        'UPDATE categories_details SET name=?, description=?, coverImage=?, icon=?, sortOrder=?, tag=?, color=?, bgGlow=?, updatedAt=CURRENT_TIMESTAMP WHERE id=?',
+        [
+          category.name, category.description, category.coverImage, category.icon,
+          category.sortOrder, category.tag, category.color, category.bgGlow, id
+        ]
+      );
+      
+      // 如果分类名称改变了，同步更新所有相关作品的分类
+      if (oldName && oldName !== category.name) {
+        await dbAsync.run(
+          'UPDATE portfolio_items SET category=?, updatedAt=CURRENT_TIMESTAMP WHERE category=?',
+          [category.name, oldName]
+        );
+      }
+    } else {
+      await dbAsync.run(
+        'INSERT INTO categories_details (id, name, description, coverImage, icon, sortOrder, tag, color, bgGlow) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+          category.id, category.name, category.description, category.coverImage,
+          category.icon, category.sortOrder, category.tag, category.color, category.bgGlow
+        ]
+      );
+    }
+    return category;
   },
   updateSort: async (categories) => {
     for (const cat of categories) {

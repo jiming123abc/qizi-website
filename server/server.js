@@ -1019,6 +1019,12 @@ app.post('/api/data/import', async (req, res) => {
       console.log('导入了首页内容');
     }
 
+    if (data.featuredWorks && Array.isArray(data.featuredWorks)) {
+      // 直接使用 featuredWorks 的 updateSort 方法，它会先清空再插入
+      await db.featuredWorks.updateSort(data.featuredWorks);
+      console.log(`导入了 ${data.featuredWorks.length} 个精选作品`);
+    }
+
     res.json({ success: true, message: '数据导入成功' });
   } catch (error) {
     console.error('数据导入失败:', error);

@@ -4,7 +4,8 @@ import {
   getPortfolioItems, 
   getCategoriesWithDetails, 
   getTeamMembers,
-  getHomeContent 
+  getHomeContent,
+  getFeaturedWorks
 } from '../../data/store';
 
 export function Dashboard() {
@@ -41,11 +42,12 @@ export function Dashboard() {
   const handleExportData = async () => {
     setIsExporting(true);
     try {
-      const [portfolioItems, categoriesDetails, teamMembers, homeContent] = await Promise.all([
+      const [portfolioItems, categoriesDetails, teamMembers, homeContent, featuredWorks] = await Promise.all([
         getPortfolioItems(),
         getCategoriesWithDetails(),
         getTeamMembers(),
-        getHomeContent()
+        getHomeContent(),
+        getFeaturedWorks()
       ]);
 
       const exportData = {
@@ -55,7 +57,8 @@ export function Dashboard() {
           portfolioItems,
           categoriesDetails,
           teamMembers,
-          homeContent
+          homeContent,
+          featuredWorks
         }
       };
 
@@ -97,6 +100,7 @@ export function Dashboard() {
         `- ${importData.data.portfolioItems?.length || 0} 个作品\n` +
         `- ${importData.data.categoriesDetails?.length || 0} 个分类\n` +
         `- ${importData.data.teamMembers?.length || 0} 个团队成员\n` +
+        `- ${importData.data.featuredWorks?.length || 0} 个精选作品\n` +
         `- 首页内容\n\n` +
         `确定要导入吗？此操作不可撤销！`
       );
