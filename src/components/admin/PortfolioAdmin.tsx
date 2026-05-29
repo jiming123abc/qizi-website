@@ -100,6 +100,8 @@ export function PortfolioAdmin() {
     }
   }, [editingItem, formData.hidden]);
   const [additionalImagesUploading, setAdditionalImagesUploading] = useState(false);
+  const [additionalImageSource, setAdditionalImageSource] = useState<'upload' | 'url'>('upload');
+  const [additionalImageUrlInput, setAdditionalImageUrlInput] = useState('');
 
   useEffect(() => {
     refreshItems();
@@ -537,6 +539,16 @@ export function PortfolioAdmin() {
     }
     // Clear the input
     e.target.value = '';
+  };
+
+  const handleAddImageByUrl = () => {
+    if (additionalImageUrlInput.trim()) {
+      setFormData(prev => ({
+        ...prev,
+        images: [...(prev.images || []), additionalImageUrlInput.trim()]
+      }));
+      setAdditionalImageUrlInput('');
+    }
   };
 
   const removeAdditionalImage = (index: number) => {
@@ -1050,37 +1062,114 @@ export function PortfolioAdmin() {
                     正在上传图片...
                   </div>
                 )}
-                <div className="grid grid-cols-4 gap-3 mb-3">
-                  {/* Upload button */}
-                  <label className="flex flex-col items-center justify-center aspect-square rounded-xl border-2 border-dashed border-white/20 cursor-pointer hover:border-primary/50 transition-colors bg-surface-container-low hover:bg-surface-container">
-                    <Plus className="w-6 h-6 text-on-surface-variant mb-1" />
-                    <span className="text-xs text-on-surface-variant">添加图片</span>
-                    <input
-                      type="file"
-                      accept="image/jpeg,image/png,image/webp,image/gif"
-                      multiple
-                      onChange={handleMultipleImageUpload}
-                      className="hidden"
-                    />
-                  </label>
-                  {/* Existing images */}
-                  {(formData.images || []).map((imageUrl, index) => (
-                    <div key={index} className="relative aspect-square rounded-xl overflow-hidden border border-white/10 bg-surface-container-low group">
-                      <img src={imageUrl} alt={`图片 ${index + 1}`} className="w-full h-full object-cover" />
-                      <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                        <button
-                          type="button"
-                          onClick={() => removeAdditionalImage(index)}
-                          className="p-2 rounded-full bg-red-500/80 text-white hover:bg-red-500 transition-colors"
-                        >
-                          <X className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                <div className="flex gap-2 mb-3">
+                  <button
+                    onClick={() => setAdditionalImageSource('upload')}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-all ${
+                      additionalImageSource === 'upload'
+                        ? 'bg-primary/20 border-primary/50 text-primary'
+                        : 'bg-surface-container border-white/10 text-on-surface-variant hover:text-on-surface'
+                    }`}
+                  >
+                    <Upload className="w-4 h-4" />
+                    本地上传
+                  </button>
+                  <button
+                    onClick={() => setAdditionalImageSource('url')}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-all ${
+                      additionalImageSource === 'url'
+                        ? 'bg-primary/20 border-primary/50 text-primary'
+                        : 'bg-surface-container border-white/10 text-on-surface-variant hover:text-on-surface'
+                    }`}
+                  >
+                    <Link className="w-4 h-4" />
+                    网络地址
+                  </button>
                 </div>
+
+                {additionalImageSource === 'upload' ? (
+                  <div className="grid grid-cols-4 gap-3 mb-3">
+                    {/* Upload button */}
+                    <label className="flex flex-col items-center justify-center aspect-square rounded-xl border-2 border-dashed border-white/20 cursor-pointer hover:border-primary/50 transition-colors bg-surface-container-low hover:bg-surface-container">
+                      <Plus className="w-6 h-6 text-on-surface-variant mb-1" />
+                      <span className="text-xs text-on-surface-variant">添加图片</span>
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp,image/gif"
+                        multiple
+                        onChange={handleMultipleImageUpload}
+                        className="hidden"
+                      />
+                    </label>
+                    {/* Existing images */}
+                    {(formData.images || []).map((imageUrl, index) => (
+                      <div key={index} className="relative aspect-square rounded-xl overflow-hidden border border-white/10 bg-surface-container-low group">
+                        <img src={imageUrl} alt={`图片 ${index + 1}`} className="w-full h-full object-cover" />
+                        <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                          <button
+                            type="button"
+                            onClick={() => removeAdditionalImage(index)}
+                            className="p-2 rounded-full bg-red-500/80 text-white hover:bg-red-500 transition-colors"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="mb-3 space-y-3">
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={additionalImageUrlInput}
+                        onChange={(e) => setAdditionalImageUrlInput(e.target.value)}
+                        onKeyPress={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleAddImageByUrl();
+                          }
+                        }}
+                        className="flex-1 px-4 py-3 rounded-xl bg-surface-container border border-white/10 text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none focus:border-primary/50 transition-colors"
+                        placeholder="请输入图片URL地址"
+                      />
+                      <button
+                        onClick={handleAddImageByUrl}
+                        disabled={!additionalImageUrlInput.trim()}
+                        className="px-6 py-3 rounded-xl bg-primary text-on-primary hover:bg-primary/90 transition-colors disabled:opacity-50"
+                      >
+                        添加
+                      </button>
+                    </div>
+                    {additionalImageUrlInput && (
+                      <div className="rounded-xl overflow-hidden border border-white/10">
+                        <img 
+                          src={additionalImageUrlInput} 
+                          alt="图片预览" 
+                          className="w-full h-48 object-cover" 
+                        />
+                      </div>
+                    )}
+                    <div className="grid grid-cols-4 gap-3">
+                      {(formData.images || []).map((imageUrl, index) => (
+                        <div key={index} className="relative aspect-square rounded-xl overflow-hidden border border-white/10 bg-surface-container-low group">
+                          <img src={imageUrl} alt={`图片 ${index + 1}`} className="w-full h-full object-cover" />
+                          <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                            <button
+                              type="button"
+                              onClick={() => removeAdditionalImage(index)}
+                              className="p-2 rounded-full bg-red-500/80 text-white hover:bg-red-500 transition-colors"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <p className="text-xs text-on-surface-variant/50">
-                  添加更多案例图片（可选），支持多选上传
+                  添加更多案例图片（可选），支持本地上传或粘贴网络图片地址
                 </p>
               </div>
             )}
