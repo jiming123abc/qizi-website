@@ -13,6 +13,11 @@ export function TeamAdmin() {
   const [draggedItem, setDraggedItem] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [avatarSourceType, setAvatarSourceType] = useState<'upload' | 'url'>('upload');
+  const [avatarUploadStatus, setAvatarUploadStatus] = useState({
+    phase: 'idle' as 'idle' | 'uploading' | 'done',
+    progress: 0,
+    message: ''
+  });
 
   const [formData, setFormData] = useState({
     name: '',
@@ -69,12 +74,35 @@ export function TeamAdmin() {
 
   const handleAvatarUpload = async (file: File, forceLocal: boolean = false) => {
     setIsLoading(true);
+    const fileSizeKB = (file.size / 1024).toFixed(1);
+    
+    setAvatarUploadStatus({ 
+      phase: 'uploading', 
+      progress: 0, 
+      message: `正在上传头像 (${fileSizeKB}KB)...` 
+    });
+
     try {
-      const result = await uploadImage(file, undefined, forceLocal);
+      const result = await uploadImage(file, (progress) => {
+        setAvatarUploadStatus({ ...progress, phase: progress.phase === 'uploading' ? 'uploading' : 'uploading' });
+      }, forceLocal);
+      
       const url = result.url;
       setFormData(prev => ({ ...prev, avatar: url }));
+      
+      setAvatarUploadStatus(prev => ({ 
+        ...prev,
+        phase: 'done', 
+        progress: 100 
+      }));
     } catch (error) {
       const uploadError = error as UploadError;
+      setAvatarUploadStatus({ 
+        phase: 'done', 
+        progress: 0, 
+        message: `上传失败: ${uploadError.message}` 
+      });
+      
       if (uploadError.ossError) {
         const useLocal = confirm(
           `${uploadError.message}\n\n是否使用本地存储？`
@@ -250,31 +278,69 @@ export function TeamAdmin() {
               </div>
 
               {avatarSourceType === 'upload' ? (
-                formData.avatar ? (
-                  <div className="relative rounded-xl overflow-hidden border border-white/10 w-32 h-32">
-                    <img src={formData.avatar} alt="头像" className="w-full h-full object-cover" />
-                    <button
-                      onClick={() => setFormData(prev => ({ ...prev, avatar: '' }))}
-                      className="absolute top-2 right-2 p-2 rounded-lg bg-black/50 text-white hover:bg-black/70 transition-colors"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-                ) : (
-                  <label className="flex flex-col items-center justify-center w-32 h-32 rounded-xl border-2 border-dashed border-white/20 cursor-pointer hover:border-primary/50 transition-colors">
-                    <Image className="w-8 h-8 text-on-surface-variant mb-2" />
-                    <span className="text-xs text-on-surface-variant">上传头像</span>
-                    <input
-                      type="file"
-                      accept="image/jpeg,image/png,image/webp"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) handleAvatarUpload(file);
-                      }}
-                      className="hidden"
-                    />
-                  </label>
-                )
+                <>
+                  {formData.avatar ? (
+                    <div className="relative rounded-xl overflow-hidden border border-white/10 w-32 h-32">
+                      <img src={formData.avatar} alt="头像" className="w-full h-full object-cover" />
+                      <button
+                        onClick={() => setFormData(prev => ({ ...prev, avatar: '' }))}
+                        className="absolute top-2 right-2 p-2 rounded-lg bg-black/50 text-white hover:bg-black/70 transition-colors"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <label className="flex flex-col items-center justify-center w-32 h-32 rounded-xl border-2 border-dashed border-white/20 cursor-pointer hover:border-primary/50 transition-colors">
+                      <Image className="w-8 h-8 text-on-surface-variant mb-2" />
+                      <span className="text-xs text-on-surface-variant">上传头像</span>
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) handleAvatarUpload(file);
+                        }}
+                        className="hidden"
+                      />
+                    </label>
+                  )}
+                  
+                  {avatarUploadStatus.phase !== 'idle' && (
+                    <div className="mt-3 p-4 rounded-xl bg-surface-container border border-white/10">
+                      <div className="flex items-start gap-3">
+                        {avatarUploadStatus.phase === 'uploading' && avatarUploadStatus.progress < 100 && (
+                          <Loader2 className="w-4 h-4 text-secondary animate-spin mt-0.5 flex-shrink-0" />
+                        )}
+                        {avatarUploadStatus.phase === 'done' && avatarUploadStatus.message.includes('失败') && (
+                          <AlertCircle className="w-4 h-4 text-red-400 mt-0.5 flex-shrink-0" />
+                        )}
+                        {avatarUploadStatus.phase === 'done' && !avatarUploadStatus.message.includes('失败') && (
+                          <Check className="w-4 h-4 text-green-400 mt-0.5 flex-shrink-0" />
+                        )}
+                        <div className="flex-1">
+                          <div className={`text-sm whitespace-pre-line ${avatarUploadStatus.message.includes('失败') ? 'text-red-400' : 'text-on-surface-variant'}`}>
+                            {avatarUploadStatus.message}
+                          </div>
+                          {avatarUploadStatus.phase !== 'done' && avatarUploadStatus.progress > 0 && (
+                            <div className="text-xs text-on-surface-variant/70 mt-1">
+                              进度：{avatarUploadStatus.progress}%
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      {avatarUploadStatus.phase !== 'done' && (
+                        <div className="mt-3">
+                          <div className="w-full bg-white/5 rounded-full h-3 overflow-hidden">
+                            <div 
+                              className="h-full rounded-full bg-gradient-to-r from-primary to-secondary transition-all duration-300"
+                              style={{ width: `${avatarUploadStatus.progress}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </>
               ) : (
                 <>
                   <input

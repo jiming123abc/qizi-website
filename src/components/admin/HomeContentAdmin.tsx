@@ -22,6 +22,11 @@ export function HomeContentAdmin() {
     progress: 0,
     message: ''
   });
+  const [heroImageUploadStatus, setHeroImageUploadStatus] = useState({
+    phase: 'idle' as 'idle' | 'uploading' | 'done',
+    progress: 0,
+    message: ''
+  });
 
   useEffect(() => {
     const loadContent = async () => {
@@ -40,7 +45,9 @@ export function HomeContentAdmin() {
     setIsLoading(true);
     const fileSizeKB = (file.size / 1024).toFixed(1);
     
-    setImageUploadStatus({ 
+    const setStatus = isHeroImage ? setHeroImageUploadStatus : setImageUploadStatus;
+    
+    setStatus({ 
       phase: 'uploading', 
       progress: 0, 
       message: `正在上传图片 (${fileSizeKB}KB)...` 
@@ -48,7 +55,7 @@ export function HomeContentAdmin() {
 
     try {
       const result = await uploadImage(file, (progress) => {
-        setImageUploadStatus({ ...progress, phase: progress.phase === 'uploading' ? 'uploading' : 'uploading' });
+        setStatus({ ...progress, phase: progress.phase === 'uploading' ? 'uploading' : 'uploading' });
       }, forceLocal);
       
       const url = result.url;
@@ -60,14 +67,14 @@ export function HomeContentAdmin() {
         setContent(prev => ({ ...prev, heroSlides: newSlides }));
       }
       
-      setImageUploadStatus(prev => ({ 
+      setStatus(prev => ({ 
         ...prev,
         phase: 'done', 
         progress: 100 
       }));
     } catch (error) {
       const uploadError = error as UploadError;
-      setImageUploadStatus({ 
+      setStatus({ 
         phase: 'done', 
         progress: 0, 
         message: `上传失败: ${uploadError.message}` 
@@ -441,35 +448,35 @@ export function HomeContentAdmin() {
                       </label>
                     )}
                     
-                    {imageUploadStatus.phase !== 'idle' && (
+                    {heroImageUploadStatus.phase !== 'idle' && (
                       <div className="mt-3 p-4 rounded-xl bg-surface-container border border-white/10">
                         <div className="flex items-start gap-3">
-                          {imageUploadStatus.phase === 'uploading' && imageUploadStatus.progress < 100 && (
+                          {heroImageUploadStatus.phase === 'uploading' && heroImageUploadStatus.progress < 100 && (
                             <Loader2 className="w-4 h-4 text-secondary animate-spin mt-0.5 flex-shrink-0" />
                           )}
-                          {imageUploadStatus.phase === 'done' && imageUploadStatus.message.includes('失败') && (
+                          {heroImageUploadStatus.phase === 'done' && heroImageUploadStatus.message.includes('失败') && (
                             <AlertCircle className="w-4 h-4 text-red-400 mt-0.5 flex-shrink-0" />
                           )}
-                          {imageUploadStatus.phase === 'done' && !imageUploadStatus.message.includes('失败') && (
+                          {heroImageUploadStatus.phase === 'done' && !heroImageUploadStatus.message.includes('失败') && (
                             <Check className="w-4 h-4 text-green-400 mt-0.5 flex-shrink-0" />
                           )}
                           <div className="flex-1">
-                            <div className={`text-sm whitespace-pre-line ${imageUploadStatus.message.includes('失败') ? 'text-red-400' : 'text-on-surface-variant'}`}>
-                              {imageUploadStatus.message}
+                            <div className={`text-sm whitespace-pre-line ${heroImageUploadStatus.message.includes('失败') ? 'text-red-400' : 'text-on-surface-variant'}`}>
+                              {heroImageUploadStatus.message}
                             </div>
-                            {imageUploadStatus.phase !== 'done' && imageUploadStatus.progress > 0 && (
+                            {heroImageUploadStatus.phase !== 'done' && heroImageUploadStatus.progress > 0 && (
                               <div className="text-xs text-on-surface-variant/70 mt-1">
-                                进度：{imageUploadStatus.progress}%
+                                进度：{heroImageUploadStatus.progress}%
                               </div>
                             )}
                           </div>
                         </div>
-                        {imageUploadStatus.phase !== 'done' && (
+                        {heroImageUploadStatus.phase !== 'done' && (
                           <div className="mt-3">
                             <div className="w-full bg-white/5 rounded-full h-3 overflow-hidden">
                               <div 
                                 className="h-full rounded-full bg-gradient-to-r from-primary to-secondary transition-all duration-300"
-                                style={{ width: `${imageUploadStatus.progress}%` }}
+                                style={{ width: `${heroImageUploadStatus.progress}%` }}
                               />
                             </div>
                           </div>
