@@ -1048,6 +1048,12 @@ async function getReferencedFiles() {
     if (item.videoUrl) files.add(item.videoUrl);
   });
 
+  // 获取 featured works
+  const featuredWorks = await db.featuredWorks.getAll();
+  featuredWorks.forEach(work => {
+    if (work.img) files.add(work.img);
+  });
+
   // 获取 home content
   const homeContent = await db.homeContent.get();
   if (homeContent.heroImage) files.add(homeContent.heroImage);
@@ -1097,11 +1103,20 @@ function extractFilePath(url) {
 
 // 检查文件是否被引用
 function isFileReferenced(filePath, referencedFiles) {
-  const normalizedFile = filePath.toLowerCase();
+  const normalizedFile = decodeURIComponent(filePath.toLowerCase());
+  
   return referencedFiles.some(ref => {
     const normalizedRef = extractFilePath(ref);
     if (!normalizedRef) return false;
-    return normalizedFile.includes(normalizedRef.toLowerCase());
+    
+    const normalizedRefLower = decodeURIComponent(normalizedRef.toLowerCase());
+    
+    // 两种匹配方式都检查
+    const fileIncludesRef = normalizedFile.includes(normalizedRefLower);
+    const refIncludesFile = normalizedRefLower.includes(normalizedFile);
+    const exactMatch = normalizedFile === normalizedRefLower;
+    
+    return fileIncludesRef || refIncludesFile || exactMatch;
   });
 }
 
