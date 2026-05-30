@@ -607,7 +607,7 @@ export function PortfolioAdmin() {
                     ) : (
                       <span className="font-bold text-yellow-400">未能检测</span>
                     )}
-                    ，超过建议的 2000kbps，建议压缩后上传。
+                    ，超过建议的 3000kbps，建议压缩后上传。
                   </p>
                   {!pendingHighBitrateInfo.serverCompressionAvailable && (
                     <p className="text-sm text-red-400 mt-2">

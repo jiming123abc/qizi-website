@@ -3,7 +3,7 @@ const FILE_SIZE_LIMITS = {
   video: 1024 * 1024 * 1024
 };
 
-const TARGET_BITRATE_KBPS = 2000;
+const TARGET_BITRATE_KBPS = 3000;
 const CLOUDFLARE_MAX_MB = 95;
 
 function formatDuration(seconds: number): string {
