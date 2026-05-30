@@ -945,7 +945,7 @@ export function PortfolioAdmin() {
                     }`}
                   >
                     <Link className="w-4 h-4" />
-                    视频点播URL
+                    网络地址
                   </button>
                 </div>
 
