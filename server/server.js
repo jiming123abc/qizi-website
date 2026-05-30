@@ -159,7 +159,7 @@ if (isOSSConfigured) {
     accessKeyId: process.env.REACT_APP_OSS_ACCESS_KEY_ID,
     accessKeySecret: process.env.REACT_APP_OSS_ACCESS_KEY_SECRET,
     bucket: process.env.REACT_APP_OSS_BUCKET,
-    region: 'oss-cn-beijing',
+    region: process.env.REACT_APP_OSS_REGION || 'oss-cn-beijing',
     secure: true
   });
 }
@@ -1029,6 +1029,228 @@ app.post('/api/data/import', async (req, res) => {
   } catch (error) {
     console.error('数据导入失败:', error);
     res.status(500).json({ success: false, message: '数据导入失败' });
+  }
+});
+
+// ================= 存储管理 API =================
+
+// 获取数据库中所有引用的文件路径
+async function getReferencedFiles() {
+  const files = new Set();
+  
+  // 获取 portfolio items
+  const portfolioItems = await db.portfolioItems.getAll();
+  portfolioItems.forEach(item => {
+    if (item.img) files.add(item.img);
+    if (item.images && Array.isArray(item.images)) {
+      item.images.forEach(img => files.add(img));
+    }
+    if (item.videoUrl) files.add(item.videoUrl);
+  });
+
+  // 获取 home content
+  const homeContent = await db.homeContent.get();
+  if (homeContent.heroImage) files.add(homeContent.heroImage);
+  if (homeContent.heroSlides && Array.isArray(homeContent.heroSlides)) {
+    homeContent.heroSlides.forEach(slide => {
+      if (slide.img) files.add(slide.img);
+    });
+  }
+
+  // 获取 team members
+  const teamMembers = await db.teamMembers.getAll();
+  teamMembers.forEach(member => {
+    if (member.avatar) files.add(member.avatar);
+  });
+
+  // 获取 categories
+  const categories = await db.categoriesDetails.getAll();
+  categories.forEach(cat => {
+    if (cat.coverImage) files.add(cat.coverImage);
+  });
+
+  return Array.from(files);
+}
+
+// 从 URL 提取文件路径
+function extractFilePath(url) {
+  if (!url) return null;
+  // 如果是完整的 OSS URL
+  if (url.startsWith('http')) {
+    try {
+      const urlObj = new URL(url);
+      // 路径格式: /images/xxx.jpg
+      const pathname = urlObj.pathname;
+      if (pathname) {
+        return pathname.startsWith('/') ? pathname.slice(1) : pathname;
+      }
+    } catch (e) {
+      // 忽略
+    }
+  }
+  // 如果是相对路径
+  if (url.startsWith('/')) {
+    return url.slice(1);
+  }
+  return url;
+}
+
+// 检查文件是否被引用
+function isFileReferenced(filePath, referencedFiles) {
+  const normalizedFile = filePath.toLowerCase();
+  return referencedFiles.some(ref => {
+    const normalizedRef = extractFilePath(ref);
+    if (!normalizedRef) return false;
+    return normalizedFile.includes(normalizedRef.toLowerCase());
+  });
+}
+
+// 获取所有未引用文件
+app.get('/api/storage/unreferenced', async (req, res) => {
+  try {
+    const referencedFiles = await getReferencedFiles();
+    const unreferencedFiles = [];
+
+    // 检查 OSS 文件（如果配置了）
+    if (isOSSConfigured && ossClient) {
+      try {
+        let continuationToken = null;
+        do {
+          const result = await ossClient.listV2({
+            prefix: '',
+            'max-keys': 100,
+            'continuation-token': continuationToken
+          });
+
+          if (result.objects) {
+            result.objects.forEach(obj => {
+              // 只处理图片和视频文件
+              const ext = obj.name.split('.').pop().toLowerCase();
+              const isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext);
+              const isVideo = ['mp4', 'webm', 'mov', 'ogg'].includes(ext);
+
+              if (isImage || isVideo) {
+                if (!isFileReferenced(obj.name, referencedFiles)) {
+                  // 使用和上传时一样的 URL 格式
+                  const publicUrl = `https://${ossClient.options.bucket}.${ossClient.options.region}.aliyuncs.com/${obj.name}`;
+                  unreferencedFiles.push({
+                    name: obj.name,
+                    size: obj.size,
+                    url: publicUrl,
+                    source: 'oss',
+                    lastModified: obj.lastModified
+                  });
+                }
+              }
+            });
+          }
+
+          continuationToken = result.nextContinuationToken;
+        } while (continuationToken);
+      } catch (ossError) {
+        console.warn('获取 OSS 文件列表失败:', ossError.message);
+        // 继续执行，不阻止本地文件的检查
+      }
+    }
+
+    // 检查本地文件
+    const localImagesPath = path.join(__dirname, '../public/uploads/images');
+    const localVideosPath = path.join(__dirname, '../public/uploads/videos');
+
+    const scanLocalFiles = (dirPath, source) => {
+      if (fs.existsSync(dirPath)) {
+        const files = fs.readdirSync(dirPath);
+        files.forEach(file => {
+          const filePath = path.join(dirPath, file);
+          const stat = fs.statSync(filePath);
+          if (stat.isFile()) {
+            const relativePath = `uploads/${source}/${file}`;
+            if (!isFileReferenced(relativePath, referencedFiles)) {
+              unreferencedFiles.push({
+                name: relativePath,
+                size: stat.size,
+                url: `/${relativePath}`,
+                source: 'local',
+                lastModified: stat.mtime.toISOString()
+              });
+            }
+          }
+        });
+      }
+    };
+
+    scanLocalFiles(localImagesPath, 'images');
+    scanLocalFiles(localVideosPath, 'videos');
+
+    // 计算总大小
+    const totalSize = unreferencedFiles.reduce((sum, f) => sum + f.size, 0);
+
+    res.json({
+      success: true,
+      data: {
+        files: unreferencedFiles,
+        totalSize,
+        count: unreferencedFiles.length
+      }
+    });
+  } catch (error) {
+    console.error('获取未引用文件失败:', error);
+    res.status(500).json({ success: false, message: '获取未引用文件失败' });
+  }
+});
+
+// 删除指定文件
+app.delete('/api/storage/files', async (req, res) => {
+  try {
+    const { files } = req.body;
+
+    if (!Array.isArray(files) || files.length === 0) {
+      return res.status(400).json({ success: false, message: '请选择要删除的文件' });
+    }
+
+    const results = [];
+
+    for (const file of files) {
+      try {
+        if (file.source === 'oss' && isOSSConfigured && ossClient) {
+          // 删除 OSS 文件
+          await ossClient.delete(file.name);
+          results.push({ name: file.name, success: true, source: 'oss' });
+        } else if (file.source === 'local') {
+          // 删除本地文件
+          const filePath = path.join(__dirname, '../public', file.name);
+          if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+            results.push({ name: file.name, success: true, source: 'local' });
+          } else {
+            results.push({ name: file.name, success: false, error: '文件不存在', source: 'local' });
+          }
+        }
+      } catch (deleteError) {
+        console.error(`删除文件失败 ${file.name}:`, deleteError.message);
+        results.push({ 
+          name: file.name, 
+          success: false, 
+          error: deleteError.message,
+          source: file.source 
+        });
+      }
+    }
+
+    const successCount = results.filter(r => r.success).length;
+    const failCount = results.filter(r => !r.success).length;
+
+    res.json({
+      success: true,
+      data: {
+        successCount,
+        failCount,
+        results
+      }
+    });
+  } catch (error) {
+    console.error('删除文件失败:', error);
+    res.status(500).json({ success: false, message: '删除文件失败' });
   }
 });
 

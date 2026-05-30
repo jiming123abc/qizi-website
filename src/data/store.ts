@@ -102,9 +102,20 @@ async function apiPut<T = void, Body = unknown>(endpoint: string, body: Body, er
 }
 
 // 通用 DELETE 请求
-async function apiDelete(endpoint: string, errorMessage: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/${endpoint}`, { method: 'DELETE' });
+async function apiDelete<T = void, Body = unknown>(endpoint: string, errorMessage: string, body?: Body): Promise<T> {
+  const options: RequestInit = { 
+    method: 'DELETE'
+  };
+  if (body) {
+    options.headers = { 'Content-Type': 'application/json' };
+    options.body = JSON.stringify(body);
+  }
+  const res = await fetch(`${API_BASE}/${endpoint}`, options);
   if (!res.ok) throw new Error(errorMessage);
+  if (res.headers.get('content-length') !== '0' && res.headers.get('content-type')?.includes('application/json')) {
+    return res.json() as Promise<T>;
+  }
+  return undefined as T;
 }
 
 // 通用批量更新函数
@@ -245,4 +256,37 @@ export async function deleteCategoryWithDetails(id: string): Promise<void> {
 export async function updateCategoriesSortOrder(categories: CategoryWithDetails[]): Promise<void> {
   const sortData = categories.map(cat => ({ id: cat.id, sortOrder: cat.sortOrder }));
   return apiPut('categories-details/sort', sortData, 'Failed to update categories sort order');
+}
+
+// ================= 存储管理 API =================
+
+export interface UnreferencedFile {
+  name: string;
+  size: number;
+  url: string;
+  source: 'oss' | 'local';
+  lastModified: string;
+}
+
+export async function getUnreferencedFiles(): Promise<{
+  files: UnreferencedFile[];
+  totalSize: number;
+  count: number;
+}> {
+  const data = await apiGet<any>('storage/unreferenced', 'Failed to fetch unreferenced files');
+  return data.data;
+}
+
+export async function deleteFiles(files: UnreferencedFile[]): Promise<{
+  successCount: number;
+  failCount: number;
+  results: Array<{
+    name: string;
+    success: boolean;
+    error?: string;
+    source: string;
+  }>;
+}> {
+  const data = await apiDelete<any>('storage/files', 'Failed to delete files', { files });
+  return data.data;
 }

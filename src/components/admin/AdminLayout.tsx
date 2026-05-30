@@ -9,10 +9,11 @@ import {
   ChevronRight,
   Star,
   Home,
-  Users
+  Users,
+  HardDrive
 } from 'lucide-react';
 
-type AdminTab = 'dashboard' | 'portfolio' | 'categories' | 'featured' | 'home' | 'team';
+type AdminTab = 'dashboard' | 'portfolio' | 'categories' | 'featured' | 'home' | 'team' | 'storage';
 
 interface AdminLayoutProps {
   activeTab: AdminTab;
@@ -27,7 +28,8 @@ const menuItems: { id: AdminTab; label: string; icon: React.ReactNode }[] = [
   { id: 'portfolio', label: '案例管理', icon: <FolderOpen className="w-5 h-5" /> },
   { id: 'featured', label: '精选作品', icon: <Star className="w-5 h-5" /> },
   { id: 'categories', label: '分类管理', icon: <Tag className="w-5 h-5" /> },
-  { id: 'team', label: '团队管理', icon: <Users className="w-5 h-5" /> }
+  { id: 'team', label: '团队管理', icon: <Users className="w-5 h-5" /> },
+  { id: 'storage', label: '存储管理', icon: <HardDrive className="w-5 h-5" /> }
 ];
 
 export function AdminLayout({ activeTab, onTabChange, onLogout, children }: AdminLayoutProps) {

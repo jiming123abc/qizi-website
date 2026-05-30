@@ -19,13 +19,14 @@ import { CategoriesAdmin } from './components/admin/CategoriesAdmin';
 import { FeaturedAdmin } from './components/admin/FeaturedAdmin';
 import { HomeContentAdmin } from './components/admin/HomeContentAdmin';
 import { TeamAdmin } from './components/admin/TeamAdmin';
+import StorageAdmin from './components/admin/StorageAdmin';
 import { Login } from './components/admin/Login';
 import { Settings } from 'lucide-react';
 import { setupShareMetadata } from './lib/shareUtils';
 import { getHomeContent } from './data/store';
 
 type Tab = 'home' | 'team' | 'services' | 'portfolio' | 'search';
-type AdminTab = 'dashboard' | 'portfolio' | 'categories' | 'featured' | 'home' | 'team';
+type AdminTab = 'dashboard' | 'portfolio' | 'categories' | 'featured' | 'home' | 'team' | 'storage';
 
 const ADMIN_PASSWORD = 'admin123';
 
@@ -126,6 +127,7 @@ export default function App() {
         {adminTab === 'featured' && <FeaturedAdmin />}
         {adminTab === 'categories' && <CategoriesAdmin />}
         {adminTab === 'team' && <TeamAdmin />}
+        {adminTab === 'storage' && <StorageAdmin />}
       </AdminLayout>
     );
   }
