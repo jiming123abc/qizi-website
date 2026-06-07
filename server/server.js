@@ -1325,53 +1325,130 @@ app.post('/api/ai/generate-cover', async (req, res) => {
       return res.status(400).json({ success: false, message: '请输入分类名称' });
     }
 
-    // 1. 优先尝试使用 Pollinations AI 生成
-    try {
-      const prompt = `专业的数字艺术图片，关于${categoryName}。${description || ''}。风格现代，高清，有设计感，适合作为网站封面图。`;
-      const seed = Date.now();
-      const aiUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1200&height=800&nologo=true&seed=${seed}`;
-      
-      // 测试请求
-      const testResponse = await fetch(aiUrl, { method: 'HEAD' });
-      if (testResponse.ok) {
-        return res.json({ 
-          success: true, 
-          data: { url: aiUrl } 
-        });
-      }
-    } catch (aiError) {
-      console.log('AI 服务不可用，尝试备选方案:', aiError.message);
-    }
-
-    // 2. AI 失败后，尝试匹配预设封面图
-    for (const [key, url] of Object.entries(presetCovers)) {
-      if (categoryName.toLowerCase().includes(key.toLowerCase())) {
-        return res.json({ 
-          success: true, 
-          data: { url } 
-        });
-      }
-    }
-
-    // 3. 都失败，生成渐变封面
-    const seed = categoryName.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-    const gradientUrl = generateGradientCover(seed);
-
+    // 1. 优先直接使用 Pollinations AI 生成（不做HEAD测试，直接返回AI地址）
+    const prompt = `专业的数字艺术图片，关于${categoryName}。${description || ''}。风格现代，高清，有设计感，适合作为网站封面图。`;
+    const seed = Date.now();
+    const aiUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1200&height=800&nologo=true&seed=${seed}`;
+    
+    console.log('AI 生成封面图 URL:', aiUrl);
     return res.json({ 
       success: true, 
-      data: { url: gradientUrl } 
+      data: { url: aiUrl } 
     });
 
   } catch (error) {
     console.error('生成封面图失败:', error);
     
-    // 出错时返回渐变封面
-    const seed = (req.body.categoryName || 'default').split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-    const fallbackUrl = generateGradientCover(seed);
+    // 2. AI 失败后，尝试匹配预设封面图
+    try {
+      const { categoryName } = req.body;
+      for (const [key, url] of Object.entries(presetCovers)) {
+        if (categoryName.toLowerCase().includes(key.toLowerCase())) {
+          return res.json({ 
+            success: true, 
+            data: { url } 
+          });
+        }
+      }
+
+      // 3. 都失败，生成渐变封面
+      const seed = categoryName.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+      const gradientUrl = generateGradientCover(seed);
+
+      return res.json({ 
+        success: true, 
+        data: { url: gradientUrl } 
+      });
+    } catch (fallbackError) {
+      const seed = (req.body.categoryName || 'default').split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+      const fallbackUrl = generateGradientCover(seed);
+      res.json({ 
+        success: true, 
+        data: { url: fallbackUrl } 
+      });
+    }
+  }
+});
+
+// AI 生成图标
+app.post('/api/ai/generate-icon', async (req, res) => {
+  try {
+    const { categoryName, description } = req.body;
+
+    if (!categoryName) {
+      return res.status(400).json({ success: false, message: '请输入分类名称' });
+    }
+
+    // 1. 首先尝试匹配预设图标
+    const icons = {
+      '数字人': `
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2z"></path>
+          <circle cx="7" cy="13" r="1"></circle>
+          <circle cx="17" cy="13" r="1"></circle>
+        </svg>
+      `,
+      '电影': `
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"></rect>
+          <line x1="7" y1="2" x2="7" y2="22"></line>
+          <line x1="17" y1="2" x2="17" y2="22"></line>
+          <line x1="2" y1="12" x2="22" y2="12"></line>
+          <line x1="2" y1="7" x2="7" y2="7"></line>
+          <line x1="2" y1="17" x2="7" y2="17"></line>
+          <line x1="17" y1="17" x2="22" y2="17"></line>
+          <line x1="17" y1="7" x2="22" y2="7"></line>
+        </svg>
+      `,
+      '视频': `
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect>
+          <path d="M12 18h.01"></path>
+          <line x1="7" y1="6" x2="17" y2="6"></line>
+        </svg>
+      `,
+      '技术': `
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"></circle>
+          <circle cx="12" cy="12" r="6"></circle>
+          <circle cx="12" cy="12" r="2"></circle>
+        </svg>
+      `
+    };
+    
+    for (const [key, icon] of Object.entries(icons)) {
+      if (categoryName.includes(key)) {
+        return res.json({ 
+          success: true, 
+          data: { svg: icon } 
+        });
+      }
+    }
+
+    // 2. 返回默认图标
+    const defaultIcon = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"></path>
+      </svg>
+    `;
+
+    return res.json({ 
+      success: true, 
+      data: { svg: defaultIcon } 
+    });
+
+  } catch (error) {
+    console.error('生成图标失败:', error);
+    
+    const defaultIcon = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"></path>
+      </svg>
+    `;
     
     res.json({ 
       success: true, 
-      data: { url: fallbackUrl } 
+      data: { svg: defaultIcon } 
     });
   }
 });
