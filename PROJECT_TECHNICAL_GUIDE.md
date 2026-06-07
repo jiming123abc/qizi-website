@@ -152,31 +152,49 @@ app - 2/
 
 ### 4.1 分享功能文件位置
 ```
-前端文件: src/components/WeChatShareHint.tsx
-后端接口: server/server.js
-微信配置: src/lib/shareUtils.ts
+后端渲染: server/server.js
+前端提示组件: src/components/WeChatShareHint.tsx
+工具库: src/lib/shareUtils.ts
 ```
 
 ### 4.2 实现原理
-1. **JSSDK 签名生成（后端）**：
-   - 从微信获取 access_token
-   - 用 access_token 获取 jsapi_ticket
-   - 对当前 URL、noncestr、timestamp 进行 SHA1 签名
-   - 接口：`/api/wechat-jssdk-config`
+**基于 Open Graph Meta 标签的动态渲染**：
+- 不需要微信公众号或 JSSDK
+- 利用微信爬虫自动抓取页面 Meta 标签来生成分享卡片
+- 支持以下 Meta 标签：
+  - `og:title` - 分享标题
+  - `og:description` - 分享描述
+  - `og:image` - 分享缩略图
+  - `og:url` - 分享链接
+  - `wechat:title`/`wechat:description`/`wechat:image` - 微信专属标签
+  - `twitter:title`/`twitter:description`/`twitter:image` - Twitter 兼容标签
 
-2. **前端集成**：
-   - 加载微信 JSSDK 脚本
-   - 调用后端接口获取签名配置
-   - 调用 `wx.config()` 初始化
-   - 配置分享标题、描述、缩略图等
+### 4.3 工作流程
+1. **后端动态渲染**：
+   - 当用户访问首页或具体作品页时
+   - 后端从数据库获取相应内容（首页配置或作品信息）
+   - 读取 `dist/index.html` 模板
+   - 动态替换 Meta 标签内容
+   - 返回渲染后的 HTML 给浏览器
 
-### 4.3 关键代码位置
+2. **微信爬虫抓取**：
+   - 当用户在微信中分享链接时
+   - 微信爬虫会访问该链接并抓取 Meta 标签
+   - 根据抓取的内容生成分享卡片
+
+3. **作品直达**：
+   - 分享链接包含作品 ID 参数（如 `?id=123`）
+   - 前端通过 URL 参数识别并展示对应作品
+
+### 4.4 关键代码位置
 ```javascript
-// 后端 JSSDK 签名接口
-server/server.js 中查找 getWechatJsSdkConfig
+// 后端动态渲染 Meta 标签
+server/server.js 第 1281-1358 行
 
-// 前端分享组件
+// 前端分享提示组件
 src/components/WeChatShareHint.tsx
+
+// 分享工具函数
 src/lib/shareUtils.ts
 ```
 
@@ -305,8 +323,6 @@ VITE_OSS_REGION=oss-cn-beijing
 VITE_OSS_BUCKET=qizi-store
 VITE_OSS_ACCESS_KEY_ID=xxx
 VITE_OSS_ACCESS_KEY_SECRET=xxx
-WECHAT_APPID=wx12345678
-WECHAT_SECRET=xxx123
 ```
 
 ### 7.2 配置位置
@@ -367,9 +383,11 @@ ssh root@45.77.46.164 "cd /root/website && git pull origin main && npm run build
 - 检查 Bucket 是否存在，区域是否正确
 
 ### 10.3 微信分享失败
-- 检查微信 AppID 和 Secret 是否正确
-- 检查 JSSDK 安全域名配置
-- 检查 URL 签名是否正确生成
+- 检查 Meta 标签是否正确渲染（可以在浏览器中查看页面源代码）
+- 检查分享缩略图是否可访问（需要是完整的 HTTPS URL）
+- 检查首页内容配置是否正确（分享标题、描述、缩略图）
+- 微信可能缓存旧的分享信息，可以尝试清除缓存或稍等一段时间
+- 确保分享链接是 HTTPS 协议
 
 ---
 

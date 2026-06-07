@@ -439,7 +439,7 @@ export function HomeView() {
                     <div className="absolute inset-0 bg-gradient-to-t from-surface-container-low via-transparent to-transparent"></div>
                     {item.icon && (
                       <div className="absolute bottom-3 right-3 w-12 h-12 rounded-xl bg-surface-container-low/90 backdrop-blur-sm flex items-center justify-center border border-white/10">
-                        <div dangerouslySetInnerHTML={{ __html: item.icon }} className={`w-6 h-6 ${item.color || 'text-primary'}`} />
+                        <div dangerouslySetInnerHTML={{ __html: item.icon }} className={`w-6 h-6 ${item.color || 'text-primary'} flex items-center justify-center`} />
                       </div>
                     )}
                   </div>

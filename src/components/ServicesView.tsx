@@ -91,7 +91,7 @@ export function ServicesView() {
                 <div className="p-8 glass-panel relative">
                   <div className="absolute -top-10 right-8 w-16 h-16 rounded-2xl bg-surface-container shadow-xl flex items-center justify-center border border-white/5 group-hover:scale-110 transition-transform">
                     {service.icon ? (
-                      <div dangerouslySetInnerHTML={{ __html: service.icon }} className={`w-8 h-8 ${service.color || 'text-primary'}`} />
+                      <div dangerouslySetInnerHTML={{ __html: service.icon }} className={`w-8 h-8 ${service.color || 'text-primary'} flex items-center justify-center`} />
                     ) : (
                       <span className="text-2xl">🎯</span>
                     )}
