@@ -1,15 +1,64 @@
+// 预设封面图颜色方案
+const coverColors = [
+  { primary: '#667eea', secondary: '#764ba2' }, // 紫蓝渐变
+  { primary: '#f093fb', secondary: '#f5576c' }, // 粉红渐变
+  { primary: '#4facfe', secondary: '#00f2fe' }, // 青蓝渐变
+  { primary: '#43e97b', secondary: '#38f9d7' }, // 青绿渐变
+  { primary: '#fa709a', secondary: '#fee140' }, // 粉黄渐变
+  { primary: '#a8edea', secondary: '#fed6e3' }, // 浅粉渐变
+  { primary: '#d299c2', secondary: '#fef9d7' }, // 紫黄渐变
+  { primary: '#89f7fe', secondary: '#66a6ff' }, // 蓝青渐变
+];
+
+// 预设分类封面图
+const presetCovers: Record<string, string> = {
+  '数字人': 'https://images.unsplash.com/photo-1617791160505-6f00504e3519?w=1200&h=800&fit=crop',
+  '电影': 'https://images.unsplash.com/photo-1485846234645-a62644f84728?w=1200&h=800&fit=crop',
+  '视频': 'https://images.unsplash.com/photo-1492691527719-9d1e07e534b4?w=1200&h=800&fit=crop',
+  '技术': 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=1200&h=800&fit=crop',
+  'ai': 'https://images.unsplash.com/photo-1677442136019-21780ecad995?w=1200&h=800&fit=crop',
+  '艺术': 'https://images.unsplash.com/photo-1541367777708-7905fe3296c0?w=1200&h=800&fit=crop',
+};
+
+// 生成渐变封面图
+function generateGradientCover(seed: number): string {
+  const colorIndex = seed % coverColors.length;
+  const colors = coverColors[colorIndex];
+  
+  // 创建一个简单的 SVG 渐变封面
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800">
+      <defs>
+        <linearGradient id="coverGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" style="stop-color:${colors.primary};stop-opacity:1" />
+          <stop offset="100%" style="stop-color:${colors.secondary};stop-opacity:1" />
+        </linearGradient>
+      </defs>
+      <rect width="1200" height="800" fill="url(#coverGradient)" />
+      <circle cx="200" cy="200" r="100" fill="rgba(255,255,255,0.1)" />
+      <circle cx="1000" cy="600" r="150" fill="rgba(255,255,255,0.08)" />
+      <circle cx="600" cy="400" r="80" fill="rgba(255,255,255,0.12)" />
+    </svg>
+  `;
+  
+  // 转换为 data URL
+  return `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svg)))}`;
+}
+
 export async function generateCoverImage(
   categoryName: string,
   description: string
 ): Promise<string> {
-  const prompt = `专业的数字艺术图片，关于${categoryName}。${description}。风格现代，高清，有设计感，适合作为网站封面图。`;
+  // 1. 首先尝试匹配预设封面图
+  for (const [key, url] of Object.entries(presetCovers)) {
+    if (categoryName.toLowerCase().includes(key.toLowerCase())) {
+      return url;
+    }
+  }
   
-  const width = 1200;
-  const height = 800;
-  
-  // 使用 pollinations AI 免费服务
-  const seed = Date.now();
-  return `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=${width}&height=${height}&nologo=true&seed=${seed}`;
+  // 2. 如果没有匹配，生成渐变封面
+  const seed = categoryName.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  return generateGradientCover(seed);
 }
 
 export async function generateIconSVG(
