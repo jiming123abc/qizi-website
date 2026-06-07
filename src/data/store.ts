@@ -39,6 +39,7 @@ export interface HomeContent {
     img: string;
     label: string;
     title: string;
+    portfolioId?: number;
   }[];
   heroImage: string;
   shareTitle: string;

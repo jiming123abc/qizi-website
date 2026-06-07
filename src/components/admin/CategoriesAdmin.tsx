@@ -1,7 +1,8 @@
 ﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿import { useState, useEffect } from 'react';
-import { Plus, GripVertical, ChevronUp, ChevronDown, Edit2, Trash2, Image, AlertCircle, Upload, Link as LinkIcon, Save, X } from 'lucide-react';
+import { Plus, GripVertical, ChevronUp, ChevronDown, Edit2, Trash2, Image, AlertCircle, Upload, Link as LinkIcon, Save, X, Sparkles } from 'lucide-react';
 import { getCategoriesWithDetails, addCategoryWithDetails, updateCategoryDetails, deleteCategoryWithDetails, CategoryWithDetails, updateCategoriesSortOrder } from '../../data/store';
 import { uploadImage } from '../../lib/ossUtils';
+import { generateCoverImage, generateIconSVG } from '../../lib/aiGenerator';
 
 export function CategoriesAdmin() {
   const [categories, setCategories] = useState<CategoryWithDetails[]>([]);
@@ -11,6 +12,8 @@ export function CategoriesAdmin() {
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [coverImageSource, setCoverImageSource] = useState<'upload' | 'url'>('upload');
   const [isLoading, setIsLoading] = useState(false);
+  const [isGeneratingCover, setIsGeneratingCover] = useState(false);
+  const [isGeneratingIcon, setIsGeneratingIcon] = useState(false);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -78,6 +81,40 @@ export function CategoriesAdmin() {
       alert('上传失败，请重试');
     }
     setIsLoading(false);
+  };
+
+  const handleGenerateCover = async () => {
+    if (!formData.name.trim()) {
+      alert('请先输入分类名称');
+      return;
+    }
+
+    setIsGeneratingCover(true);
+    try {
+      const url = await generateCoverImage(formData.name, formData.description);
+      setFormData(prev => ({ ...prev, coverImage: url }));
+    } catch (error) {
+      console.error('生成封面失败:', error);
+      alert('生成失败，请重试');
+    }
+    setIsGeneratingCover(false);
+  };
+
+  const handleGenerateIcon = async () => {
+    if (!formData.name.trim()) {
+      alert('请先输入分类名称');
+      return;
+    }
+
+    setIsGeneratingIcon(true);
+    try {
+      const svg = await generateIconSVG(formData.name, formData.description);
+      setFormData(prev => ({ ...prev, icon: svg }));
+    } catch (error) {
+      console.error('生成图标失败:', error);
+      alert('生成失败，请重试');
+    }
+    setIsGeneratingIcon(false);
   };
 
   const handleSubmit = async () => {
@@ -260,6 +297,23 @@ export function CategoriesAdmin() {
                     <LinkIcon className="w-4 h-4 inline mr-1" />
                     网络地址
                   </button>
+                  <button
+                    onClick={handleGenerateCover}
+                    disabled={isGeneratingCover}
+                    className="flex-1 sm:flex-none px-4 py-2 rounded-lg text-sm transition-colors bg-gradient-to-r from-purple-600 to-pink-600 text-white hover:from-purple-700 hover:to-pink-700 disabled:opacity-50 flex items-center justify-center gap-1"
+                  >
+                    {isGeneratingCover ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        生成中...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-4 h-4" />
+                        AI生成
+                      </>
+                    )}
+                  </button>
                 </div>
 
                 {coverImageSource === 'upload' ? (
@@ -307,6 +361,25 @@ export function CategoriesAdmin() {
 
               <div>
                 <label className="block text-sm font-label text-on-surface mb-2">图标 (SVG)</label>
+                <div className="mb-3">
+                  <button
+                    onClick={handleGenerateIcon}
+                    disabled={isGeneratingIcon}
+                    className="w-full px-4 py-2 rounded-lg text-sm transition-colors bg-gradient-to-r from-purple-600 to-pink-600 text-white hover:from-purple-700 hover:to-pink-700 disabled:opacity-50 flex items-center justify-center gap-1"
+                  >
+                    {isGeneratingIcon ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        生成中...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-4 h-4" />
+                        AI生成图标
+                      </>
+                    )}
+                  </button>
+                </div>
                 <div className="flex flex-col sm:flex-row gap-3">
                   <div className="flex-1">
                     <textarea

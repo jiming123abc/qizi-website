@@ -344,7 +344,17 @@ export function HomeView() {
                     loading={index === 0 ? "eager" : "lazy"}
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent z-10"></div>
-                  <div className="absolute bottom-6 left-6 z-20 flex items-center gap-4">
+                  <div 
+                    className="absolute bottom-6 left-6 z-20 flex items-center gap-4 cursor-pointer"
+                    onClick={() => {
+                      if (slide.portfolioId) {
+                        const item = allPortfolioItems.find(p => p.id === slide.portfolioId);
+                        if (item) {
+                          setSelectedItem(item);
+                        }
+                      }
+                    }}
+                  >
                     <div className="w-12 h-12 rounded-full bg-secondary/20 backdrop-blur-md flex items-center justify-center border border-secondary/30 shadow-[0_0_20px_rgba(83,237,252,0.2)]">
                       <PlayCircle className="text-secondary w-6 h-6" />
                     </div>
@@ -357,6 +367,14 @@ export function HomeView() {
                       )}
                     </div>
                   </div>
+                  {slide.portfolioId && (
+                    <div className="absolute inset-0 z-15 cursor-pointer" onClick={() => {
+                      const item = allPortfolioItems.find(p => p.id === slide.portfolioId);
+                      if (item) {
+                        setSelectedItem(item);
+                      }
+                    }}></div>
+                  )}
                 </div>
               ))}
             </div>
