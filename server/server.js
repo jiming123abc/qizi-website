@@ -1325,17 +1325,7 @@ app.post('/api/ai/generate-cover', async (req, res) => {
       return res.status(400).json({ success: false, message: '请输入分类名称' });
     }
 
-    // 1. 首先尝试匹配预设封面图
-    for (const [key, url] of Object.entries(presetCovers)) {
-      if (categoryName.toLowerCase().includes(key.toLowerCase())) {
-        return res.json({ 
-          success: true, 
-          data: { url } 
-        });
-      }
-    }
-
-    // 2. 尝试使用 Pollinations AI 生成
+    // 1. 优先尝试使用 Pollinations AI 生成
     try {
       const prompt = `专业的数字艺术图片，关于${categoryName}。${description || ''}。风格现代，高清，有设计感，适合作为网站封面图。`;
       const seed = Date.now();
@@ -1350,10 +1340,20 @@ app.post('/api/ai/generate-cover', async (req, res) => {
         });
       }
     } catch (aiError) {
-      console.log('AI 服务不可用，使用备选方案:', aiError.message);
+      console.log('AI 服务不可用，尝试备选方案:', aiError.message);
     }
 
-    // 3. 如果 AI 不可用，生成渐变封面
+    // 2. AI 失败后，尝试匹配预设封面图
+    for (const [key, url] of Object.entries(presetCovers)) {
+      if (categoryName.toLowerCase().includes(key.toLowerCase())) {
+        return res.json({ 
+          success: true, 
+          data: { url } 
+        });
+      }
+    }
+
+    // 3. 都失败，生成渐变封面
     const seed = categoryName.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
     const gradientUrl = generateGradientCover(seed);
 
