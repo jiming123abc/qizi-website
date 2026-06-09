@@ -1,3 +1,10 @@
+import { matchIconByKeywords, iconPresets } from './iconPresets';
+
+/**
+ * 根据分类名称和描述生成封面图
+ * 优先使用后端 API 生成的封面图
+ * 失败则生成渐变色 SVG 作为兜底
+ */
 export async function generateCoverImage(
   categoryName: string,
   description: string
@@ -18,12 +25,17 @@ export async function generateCoverImage(
 
     throw new Error('API 返回格式错误');
   } catch (error) {
-    console.error('调用 AI 生成 API 失败:', error);
-    // 前端降级方案：生成本地渐变
+    console.error('调用 AI 生成封面 API 失败，使用本地方案:', error);
     return generateLocalFallback(categoryName);
   }
 }
 
+/**
+ * 根据分类名称和描述生成图标 SVG
+ * 策略:
+ * 1. 优先调用后端 API 获取匹配的图标
+ * 2. 失败时使用本地 iconPresets 智能匹配（60+ 种预设线条风格 SVG）
+ */
 export async function generateIconSVG(
   categoryName: string,
   description: string
@@ -44,13 +56,44 @@ export async function generateIconSVG(
 
     throw new Error('API 返回格式错误');
   } catch (error) {
-    console.error('调用 AI 图标生成 API 失败:', error);
-    // 前端降级方案：返回默认图标
-    return getDefaultIcon();
+    console.error('调用 AI 图标生成 API 失败，使用本地智能匹配:', error);
+    return matchIconByKeywords(categoryName, description);
   }
 }
 
-// 前端降级方案 - 生成渐变封面
+/**
+ * 获取所有图标类别（用于管理后台）
+ */
+export function getIconCategories(): string[] {
+  const categories = new Set(iconPresets.map(p => p.category));
+  return Array.from(categories);
+}
+
+/**
+ * 获取指定类别的所有图标
+ */
+export function getIconsByCategory(category: string) {
+  return iconPresets.filter(p => p.category === category);
+}
+
+/**
+ * 按名称精确获取图标 SVG
+ */
+export function getIconByName(name: string): string | null {
+  const match = iconPresets.find(p => p.name === name);
+  return match?.svg || null;
+}
+
+/**
+ * 获取所有预设图标基本信息（用于调试/列表展示）
+ */
+export function getAllIconPresets() {
+  return iconPresets.map(p => ({ name: p.name, category: p.category, keywords: p.keywords }));
+}
+
+/**
+ * 本地方案 - 生成渐变色 SVG 封面（兜底方案）
+ */
 function generateLocalFallback(categoryName: string): string {
   const coverColors = [
     { primary: '#667eea', secondary: '#764ba2' },
@@ -82,11 +125,13 @@ function generateLocalFallback(categoryName: string): string {
   return `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svg)))}`;
 }
 
-// 获取默认图标
-function getDefaultIcon(): string {
+/**
+ * 获取默认图标（星星）
+ */
+export function getDefaultIcon(): string {
   return `
     <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"></path>
+      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
     </svg>
   `;
 }
