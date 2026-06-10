@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿import { useState, useEffect } from 'react';
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿import { useState, useEffect } from 'react';
 import { Plus, GripVertical, ChevronUp, ChevronDown, Edit2, Trash2, Image, AlertCircle, Upload, Link as LinkIcon, Save, X, Sparkles } from 'lucide-react';
 import { getCategoriesWithDetails, addCategoryWithDetails, updateCategoryDetails, deleteCategoryWithDetails, CategoryWithDetails, updateCategoriesSortOrder } from '../../data/store';
 import { uploadImage } from '../../lib/ossUtils';
@@ -95,9 +95,10 @@ export function CategoriesAdmin() {
       setFormData(prev => ({ ...prev, coverImage: url }));
     } catch (error) {
       console.error('生成封面失败:', error);
-      alert('生成失败，请重试');
+      alert('生成失败，请检查网络或重试；系统已自动使用渐变图作为兜底。');
+    } finally {
+      setIsGeneratingCover(false);
     }
-    setIsGeneratingCover(false);
   };
 
   const handleGenerateIcon = async () => {
@@ -112,9 +113,10 @@ export function CategoriesAdmin() {
       setFormData(prev => ({ ...prev, icon: svg }));
     } catch (error) {
       console.error('生成图标失败:', error);
-      alert('生成失败，请重试');
+      alert('生成失败，请重试；系统已自动使用本地图标作为兜底。');
+    } finally {
+      setIsGeneratingIcon(false);
     }
-    setIsGeneratingIcon(false);
   };
 
   const handleSubmit = async () => {

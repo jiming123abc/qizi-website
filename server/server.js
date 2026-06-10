@@ -66,7 +66,28 @@ app.use((req, res, next) => {
 });
 
 app.use(cors());
-app.use(express.json());
+
+// 统一请求日志中间件
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url} - Content-Type: ${req.headers['content-type'] || 'none'}`);
+  next();
+});
+
+// JSON 解析中间件 - 增加大小限制和错误处理
+app.use(express.json({ limit: '1mb' }));
+
+// JSON 解析错误处理中间件（捕获 malformed JSON 导致的 400 错误）
+app.use((err, req, res, next) => {
+  if (err && err.type === 'entity.parse.failed') {
+    console.error(`[JSON Parse Error] ${req.method} ${req.url} - ${err.message}`);
+    return res.status(400).json({ success: false, message: '请求体格式错误，请检查 JSON 格式' });
+  }
+  if (err && err.status === 413) {
+    console.error(`[Payload Too Large] ${req.method} ${req.url} - ${err.message}`);
+    return res.status(413).json({ success: false, message: '请求体过大' });
+  }
+  next(err);
+});
 
 app.use('/images', express.static(path.join(__dirname, '../public/images')));
 app.use('/uploads', express.static(path.join(__dirname, '../public/uploads')));
@@ -1316,7 +1337,7 @@ function generateGradientCover(seed) {
   return `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svg)))}`;
 }
 
-// AI 生成封面图 - 使用多服务降级链
+// AI 生成封面图 - 使用 Pollinations.ai + 多级降级
 app.post('/api/ai/generate-cover', async (req, res) => {
   try {
     const { categoryName, description } = req.body;
@@ -1325,89 +1346,95 @@ app.post('/api/ai/generate-cover', async (req, res) => {
       return res.status(400).json({ success: false, message: '请输入分类名称' });
     }
 
-    const keywords = `${categoryName} ${description || ''}`.toLowerCase();
     const seed = Math.floor(Math.random() * 10000000);
-    
+    const combinedKeywords = `${categoryName} ${description || ''}`.trim();
     console.log(`[AI Cover] 生成: categoryName=${categoryName}, seed=${seed}`);
 
-    // 免费图片服务列表（按优先级）
-    // 1. loremflickr.com - 使用Flickr API，按关键词搜索真实图片，稳定
-    // 2. 渐变色高质量SVG - 永远可用，根据关键词配色
+    // 构建 Pollinations.ai 的英文 prompt（AI 生成图片对英文 prompt 效果更好）
+    // 先尝试使用原始中文关键词，然后是英文翻译
+    const zhPrompt = `${categoryName},${description || ''},专业摄影,高清,1200x800,电影感`;
+
+    // 图片服务列表（按优先级）
+    // 1. Pollinations.ai - 免费 AI 生图，效果最好
+    // 2. LoremFlickr - 关键词搜索真实图片
+    // 3. 渐变色 SVG 兜底
     const coverServices = [
-      // LoremFlickr - 关键词搜索真实图片
-      () => `https://loremflickr.com/1200/800/${encodeURIComponent(categoryName)}?lock=${seed}`,
-      // 备用关键词
-      () => `https://loremflickr.com/1200/800/${encodeURIComponent(keywords.split(' ').slice(0,2).join(','))}?lock=${seed+1}`,
+      // Pollinations.ai - AI 生成图片（中文 prompt）
+      () => `https://image.pollinations.ai/prompt/${encodeURIComponent(zhPrompt)}?width=1200&height=800&nologo=true&enhance=true&seed=${seed}`,
+      // Pollinations.ai - 使用简短 prompt
+      () => `https://image.pollinations.ai/prompt/${encodeURIComponent(categoryName)}?width=1200&height=800&nologo=true&seed=${seed + 1}`,
+      // LoremFlickr 兜底
+      () => `https://loremflickr.com/1200/800/${encodeURIComponent(categoryName)}?lock=${seed + 2}`,
     ];
 
     // 尝试每个图片服务
     for (let i = 0; i < coverServices.length; i++) {
       const url = coverServices[i]();
-      console.log(`[AI Cover] 尝试服务 ${i+1}: ${url.substring(0,80)}...`);
-      
+      console.log(`[AI Cover] 尝试服务 ${i + 1}: ${url.substring(0, 80)}...`);
+
       try {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 8000);
-        
+        const timeout = setTimeout(() => controller.abort(), 15000); // Pollinations 可能需要更长时间
+
         const response = await fetch(url, {
           signal: controller.signal,
           headers: { 'User-Agent': 'Mozilla/5.0' }
         });
-        
+
         clearTimeout(timeout);
-        
+
         if (response.ok) {
           const buffer = Buffer.from(await response.arrayBuffer());
-          
+
           // 检查图片是否有效（大于5KB且是image类型）
           const contentType = response.headers.get('content-type') || '';
-          if (buffer.length > 5000 && contentType.includes('image')) {
-            const ext = contentType.includes('jpeg') ? 'jpg' : 
-                       contentType.includes('png') ? 'png' : 
+          if (buffer.length > 5000 && (contentType.includes('image') || contentType === 'application/octet-stream')) {
+            const ext = contentType.includes('jpeg') ? 'jpg' :
+                       contentType.includes('png') ? 'png' :
                        contentType.includes('webp') ? 'webp' : 'jpg';
             const fileName = `ai-cover-${Date.now()}-${seed}.${ext}`;
             const filePath = path.join(uploadDir, 'images', fileName);
             fs.writeFileSync(filePath, buffer);
-            
-            console.log(`[AI Cover] 成功! 大小: ${buffer.length} bytes`);
-            return res.json({ 
-              success: true, 
-              data: { url: `/uploads/images/${fileName}` } 
+
+            console.log(`[AI Cover] 成功 (服务 ${i + 1})! 大小: ${buffer.length} bytes`);
+            return res.json({
+              success: true,
+              data: { url: `/uploads/images/${fileName}` }
             });
           } else {
-            console.log(`[AI Cover] 服务 ${i+1} 返回图片太小或类型不对: ${contentType}, ${buffer.length} bytes`);
+            console.log(`[AI Cover] 服务 ${i + 1} 返回图片太小或类型不对: ${contentType}, ${buffer.length} bytes`);
           }
         } else {
-          console.log(`[AI Cover] 服务 ${i+1} 返回状态: ${response.status}`);
+          console.log(`[AI Cover] 服务 ${i + 1} 返回状态: ${response.status}`);
         }
       } catch (err) {
-        console.log(`[AI Cover] 服务 ${i+1} 出错: ${err.message}`);
+        console.log(`[AI Cover] 服务 ${i + 1} 出错: ${err.message}`);
       }
     }
 
-    // 降级：本地生成高质量渐变封面
-    console.log(`[AI Cover] 使用本地方案: 渐变SVG`);
+    // 最终降级：本地生成高质量渐变封面
+    console.log(`[AI Cover] 所有远程服务失败，使用本地方案: 渐变SVG`);
     const gradientUrl = generateGradientCover(categoryName.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0));
 
-    return res.json({ 
-      success: true, 
-      data: { url: gradientUrl } 
+    return res.json({
+      success: true,
+      data: { url: gradientUrl }
     });
 
   } catch (error) {
     console.error('[AI Cover] 失败:', error.message);
-    
-    const seed = (req.body.categoryName || 'default').split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+
+    const seed = (req.body && req.body.categoryName || 'default').split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
     const fallbackUrl = generateGradientCover(seed);
-    
-    res.json({ 
-      success: true, 
-      data: { url: fallbackUrl } 
+
+    res.json({
+      success: true,
+      data: { url: fallbackUrl }
     });
   }
 });
 
-// AI 生成图标 - 关键词匹配 + 多风格预设
+// AI 生成图标 - 智能关键词匹配 + 动态兜底
 app.post('/api/ai/generate-icon', async (req, res) => {
   try {
     const { categoryName, description } = req.body;
@@ -1417,7 +1444,32 @@ app.post('/api/ai/generate-icon', async (req, res) => {
     }
 
     const nameLower = categoryName.toLowerCase();
-    console.log(`[AI Icon] 生成: ${categoryName}`);
+    const descLower = (description || '').toLowerCase();
+    const searchText = `${nameLower} ${descLower}`;
+    console.log(`[AI Icon] 生成: categoryName=${categoryName}`);
+
+    // 统一的默认图标
+    const getDefaultIcon = (colorSeed = 0) => {
+      const colors = [
+        { stroke: '#667eea', fill: '#667eea' },
+        { stroke: '#f093fb', fill: '#f093fb' },
+        { stroke: '#4facfe', fill: '#4facfe' },
+        { stroke: '#43e97b', fill: '#43e97b' },
+        { stroke: '#fa709a', fill: '#fa709a' },
+        { stroke: '#ffb86c', fill: '#ffb86c' },
+      ];
+      const c = colors[colorSeed % colors.length];
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="${c.stroke}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`;
+    };
+
+    const matchIcon = (text) => {
+      for (const matcher of iconMatchers) {
+        if (matcher.keywords.some(k => text.includes(k.toLowerCase()))) {
+          return matcher.svg;
+        }
+      }
+      return null;
+    };
 
     // 图标匹配器 - 线条风格SVG (60+ 种预设)
     const iconMatchers = [
@@ -1908,43 +1960,71 @@ app.post('/api/ai/generate-icon', async (req, res) => {
       }
     ];
 
-    // 匹配关键词
+    // === 智能匹配算法 ===
+    let matchedSvg = null;
+    let matchedLabel = null;
+
+    // 1. 严格匹配分类名称中的关键词
     for (const matcher of iconMatchers) {
       if (matcher.keywords.some(k => nameLower.includes(k.toLowerCase()))) {
-        console.log(`[AI Icon] 匹配到: ${matcher.label}`);
-        return res.json({ 
-          success: true, 
-          data: { svg: matcher.svg } 
-        });
+        matchedSvg = matcher.svg;
+        matchedLabel = matcher.label;
+        console.log(`[AI Icon] 名称匹配: ${matcher.label}`);
+        break;
       }
     }
-    
-    console.log(`[AI Icon] 无匹配，使用默认图标`);
 
-    // 默认图标 - 星星
-    const defaultIcon = `
-      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
-      </svg>
-    `;
+    // 2. 在 description 中匹配
+    if (!matchedSvg && descLower) {
+      for (const matcher of iconMatchers) {
+        if (matcher.keywords.some(k => descLower.includes(k.toLowerCase()))) {
+          matchedSvg = matcher.svg;
+          matchedLabel = matcher.label;
+          console.log(`[AI Icon] 描述匹配: ${matcher.label}`);
+          break;
+        }
+      }
+    }
 
-    return res.json({ 
-      success: true, 
-      data: { svg: defaultIcon } 
+    // 3. 反向模糊匹配：关键词中包含分类名称的 2 字以上部分
+    if (!matchedSvg && searchText.length >= 2) {
+      outer:
+      for (const matcher of iconMatchers) {
+        for (const k of matcher.keywords) {
+          const kl = k.toLowerCase();
+          if (kl.length >= 2) {
+            for (let i = 0; i <= kl.length - 2; i++) {
+              const sub = kl.substr(i, 2);
+              if (searchText.includes(sub)) {
+                matchedSvg = matcher.svg;
+                matchedLabel = matcher.label;
+                console.log(`[AI Icon] 模糊匹配: ${matcher.label} (sub="${sub}")`);
+                break outer;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // 4. 兜底：根据分类名称哈希选择带颜色的默认图标
+    if (!matchedSvg) {
+      console.log(`[AI Icon] 无匹配，使用默认彩色图标`);
+      const colorSeed = categoryName.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+      matchedSvg = getDefaultIcon(colorSeed);
+    }
+
+    return res.json({
+      success: true,
+      data: { svg: matchedSvg }
     });
 
   } catch (error) {
     console.error('[AI Icon] 失败:', error.message);
-    
-    const defaultIcon = `
-      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
-      </svg>
-    `;
-    
-    res.json({ 
-      success: true, 
-      data: { svg: defaultIcon } 
+    const colorSeed = (req.body && req.body.categoryName || 'default').split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    res.json({
+      success: true,
+      data: { svg: getDefaultIcon(colorSeed) }
     });
   }
 });
