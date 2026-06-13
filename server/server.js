@@ -1337,178 +1337,212 @@ function generateGradientCover(seed) {
   return `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svg)))}`;
 }
 
-// AI 生成封面图 - 使用 GeekAI (CogView-4) + 多级降级
+// ============ GeekAI 调用辅助函数 ============
+async function callGeekAIModel(modelName, prompt, quality, size, apiKey, timeoutMs) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch('https://geekai.co/api/v1/images/generations', {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: modelName,
+        prompt: prompt,
+        size: size,
+        quality: quality,
+        watermark: false,
+        n: 1,
+        response_format: 'url'
+      })
+    });
+    clearTimeout(timeout);
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '无法读取响应');
+      return { success: false, error: `HTTP ${response.status}: ${errText.substring(0, 100)}` };
+    }
+    const data = await response.json();
+    if (data && data.data && data.data[0] && data.data[0].url) {
+      return { success: true, url: data.data[0].url };
+    }
+    return { success: false, error: '返回数据格式异常' };
+  } catch (err) {
+    clearTimeout(timeout);
+    return { success: false, error: err.message };
+  }
+}
+
+function downloadAndSaveRemoteImage(imageUrl, seed, uploadDir, fs, path) {
+  return new Promise(async (resolve) => {
+    try {
+      const imgController = new AbortController();
+      const imgTimeout = setTimeout(() => imgController.abort(), 15000);
+      const imgResp = await fetch(imageUrl, { signal: imgController.signal });
+      clearTimeout(imgTimeout);
+      if (!imgResp.ok) { resolve({ success: false, error: `下载失败: HTTP ${imgResp.status}` }); return; }
+      const buffer = Buffer.from(await imgResp.arrayBuffer());
+      const contentType = imgResp.headers.get('content-type') || 'image/jpeg';
+      if (buffer.length <= 5000) {
+        resolve({ success: false, error: `图片过小: ${buffer.length} bytes` });
+        return;
+      }
+      const ext = contentType.includes('png') ? 'png' : contentType.includes('webp') ? 'webp' : 'jpg';
+      const fileName = `ai-cover-${Date.now()}-${seed}.${ext}`;
+      const filePath = path.join(uploadDir, 'images', fileName);
+      fs.writeFileSync(filePath, buffer);
+      resolve({ success: true, fileName, sizeBytes: buffer.length });
+    } catch (err) {
+      resolve({ success: false, error: err.message });
+    }
+  });
+}
+
+// AI 生成封面图 - GeekAI 两级模型 (gpt-image-2 -> z-image-turbo) + 多级降级 + 进度记录
 app.post('/api/ai/generate-cover', async (req, res) => {
+  const progress = []; // 记录每一步的状态，供前端展示
+  let usedModel = null; // 记录最终成功使用的服务
+
   try {
     const { categoryName, description } = req.body;
 
     if (!categoryName) {
-      return res.status(400).json({ success: false, message: '请输入分类名称' });
+      return res.status(400).json({ success: false, message: '请输入分类名称', progress: progress });
     }
 
     const seed = Math.floor(Math.random() * 10000000);
-    const combinedKeywords = `${categoryName} ${description || ''}`.trim();
     console.log(`[AI Cover] 生成: categoryName=${categoryName}, seed=${seed}`);
 
-    // 中文 prompt（CogView-4 对中文理解好）
     const zhPrompt = `${categoryName},${description || ''},专业摄影,高清,1200x800,电影感`;
 
-    // ============ 步骤 1: GeekAI CogView-4（首选，付费 API，高质量 AI 生成） ============
+    // ============ 步骤 1 & 2: GeekAI 两级模型链 ============
     const geekAIKey = process.env.GEEKAI_API_KEY;
+
+    // GeekAI 模型配置表（按尝试顺序排列）
+    const geekModels = [
+      { name: 'gpt-image-2', quality: 'low', label: 'GPT-Image-2', timeout: 40000 },
+      { name: 'z-image-turbo', quality: 'standard', label: '通义-文生图-Z-Image', timeout: 40000 },
+    ];
+
     if (geekAIKey) {
-      console.log(`[AI Cover] 尝试服务 1 (GeekAI CogView-4)...`);
-      try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 25000); // 生图需要较长时间
+      for (let m = 0; m < geekModels.length; m++) {
+        const model = geekModels[m];
+        console.log(`[AI Cover] 尝试 GeekAI ${model.label} (${model.name})...`);
+        progress.push({ stage: model.label, status: 'requesting', message: `正在使用 ${model.label} 生成图片...` });
 
-        const geekResponse = await fetch('https://geekai.co/api/v1/images/generations', {
-          method: 'POST',
-          signal: controller.signal,
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${geekAIKey}`
-          },
-          body: JSON.stringify({
-            model: 'cogview-4',
-            prompt: zhPrompt,
-            size: '1024x1024',
-            quality: 'hd',
-            watermark: false,
-            n: 1,
-            response_format: 'url'
-          })
-        });
+        const result = await callGeekAIModel(model.name, zhPrompt, model.quality, '1024x1024', geekAIKey, model.timeout);
 
-        clearTimeout(timeout);
+        if (result.success) {
+          console.log(`[AI Cover] ${model.label} 返回图片 URL: ${result.url.substring(0, 60)}...`);
+          progress.push({ stage: model.label, status: 'downloading', message: '下载图片中...' });
 
-        if (geekResponse.ok) {
-          const geekData = await geekResponse.json();
-          if (geekData && geekData.data && geekData.data[0] && geekData.data[0].url) {
-            const imageUrl = geekData.data[0].url;
-            console.log(`[AI Cover] GeekAI 返回图片 URL: ${imageUrl.substring(0, 60)}...`);
-
-            // 下载 GeekAI 图片到本地
-            try {
-              const imgController = new AbortController();
-              const imgTimeout = setTimeout(() => imgController.abort(), 15000);
-              const imgResp = await fetch(imageUrl, { signal: imgController.signal });
-              clearTimeout(imgTimeout);
-
-              if (imgResp.ok) {
-                const buffer = Buffer.from(await imgResp.arrayBuffer());
-                const contentType = imgResp.headers.get('content-type') || 'image/jpeg';
-                if (buffer.length > 5000) {
-                  const ext = contentType.includes('png') ? 'png' :
-                              contentType.includes('webp') ? 'webp' : 'jpg';
-                  const fileName = `ai-cover-${Date.now()}-${seed}.${ext}`;
-                  const filePath = path.join(uploadDir, 'images', fileName);
-                  fs.writeFileSync(filePath, buffer);
-
-                  console.log(`[AI Cover] 成功 (服务 1 - GeekAI CogView-4)! 大小: ${buffer.length} bytes`);
-                  return res.json({
-                    success: true,
-                    data: { url: `/uploads/images/${fileName}` }
-                  });
-                } else {
-                  console.log(`[AI Cover] GeekAI 下载图片过小: ${buffer.length} bytes`);
-                }
-              } else {
-                console.log(`[AI Cover] GeekAI 下载图片失败: ${imgResp.status}`);
-              }
-            } catch (dlErr) {
-              console.log(`[AI Cover] GeekAI 下载图片出错: ${dlErr.message}`);
-            }
+          const dlResult = await downloadAndSaveRemoteImage(result.url, seed, uploadDir, fs, path);
+          if (dlResult.success) {
+            console.log(`[AI Cover] 成功 (${model.label})! 大小: ${dlResult.sizeBytes} bytes`);
+            progress.push({ stage: model.label, status: 'success', message: `生成成功！` });
+            usedModel = model.label;
+            return res.json({
+              success: true,
+              data: { url: `/uploads/images/${dlResult.fileName}` },
+              progress: progress,
+              usedModel: usedModel
+            });
           } else {
-            console.log(`[AI Cover] GeekAI 返回数据格式异常: ${JSON.stringify(geekData).substring(0, 120)}`);
+              console.log(`[AI Cover] ${model.label} 图片下载失败: ${dlResult.error}`);
+              progress.push({ stage: model.label, status: 'failed', message: `图片下载失败: ${dlResult.error}` });
           }
         } else {
-          const errText = await geekResponse.text().catch(() => '无法读取响应');
-          console.log(`[AI Cover] GeekAI 失败: HTTP ${geekResponse.status} - ${errText.substring(0, 150)}`);
+          console.log(`[AI Cover] ${model.label} 失败: ${result.error}`);
+          progress.push({ stage: model.label, status: 'failed', message: `${model.label} 不可用: ${result.error.substring(0, 50)}` });
         }
-      } catch (err) {
-        console.log(`[AI Cover] 服务 1 (GeekAI) 出错: ${err.message}`);
       }
     } else {
       console.log(`[AI Cover] 未配置 GEEKAI_API_KEY，跳过 GeekAI 服务`);
+      progress.push({ stage: 'geekai', status: 'skipped', message: '未配置 API Key，跳过付费 AI 生图' });
     }
 
-    // ============ 降级链（原有逻辑保持不变） ============
-    // 2. Pollinations.ai - 免费 AI 生图
-    // 3. Pollinations.ai - 简短 prompt
-    // 4. LoremFlickr - 关键词搜索真实图片
-    // 5. 渐变色 SVG 兜底
+    // ============ 降级链：免费服务 ============
+    // Pollinations.ai - AI 生成图片（中文 prompt）
+    // Pollinations.ai - 使用简短 prompt
+    // LoremFlickr 兜底
+    // 渐变色 SVG 兜底
     const coverServices = [
-      // Pollinations.ai - AI 生成图片（中文 prompt）
-      () => `https://image.pollinations.ai/prompt/${encodeURIComponent(zhPrompt)}?width=1200&height=800&nologo=true&enhance=true&seed=${seed}`,
-      // Pollinations.ai - 使用简短 prompt
-      () => `https://image.pollinations.ai/prompt/${encodeURIComponent(categoryName)}?width=1200&height=800&nologo=true&seed=${seed + 1}`,
-      // LoremFlickr 兜底
-      () => `https://loremflickr.com/1200/800/${encodeURIComponent(categoryName)}?lock=${seed + 2}`,
+      { label: 'Pollinations.ai (完整描述', getUrl: () => `https://image.pollinations.ai/prompt/${encodeURIComponent(zhPrompt)}?width=1200&height=800&nologo=true&enhance=true&seed=${seed}` },
+      { label: 'Pollinations.ai (简短描述)', getUrl: () => `https://image.pollinations.ai/prompt/${encodeURIComponent(categoryName)}?width=1200&height=800&nologo=true&seed=${seed + 1}` },
+      { label: 'LoremFlickr', getUrl: () => `https://loremflickr.com/1200/800/${encodeURIComponent(categoryName)}?lock=${seed + 2}` },
     ];
 
-    // 尝试每个图片服务
     for (let i = 0; i < coverServices.length; i++) {
-      const url = coverServices[i]();
-      console.log(`[AI Cover] 尝试服务 ${i + 1}: ${url.substring(0, 80)}...`);
+      const svc = coverServices[i];
+      const url = svc.getUrl();
+      console.log(`[AI Cover] 尝试 ${svc.label}: ${url.substring(0, 80)}...`);
+      progress.push({ stage: svc.label, status: 'requesting', message: `正在从 ${svc.label} 获取图片...` });
 
       try {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 15000); // Pollinations 可能需要更长时间
-
-        const response = await fetch(url, {
-          signal: controller.signal,
-          headers: { 'User-Agent': 'Mozilla/5.0' }
-        });
-
+        const timeout = setTimeout(() => controller.abort(), 15000);
+        const response = await fetch(url, { signal: controller.signal, headers: { 'User-Agent': 'Mozilla/5.0' } });
         clearTimeout(timeout);
 
         if (response.ok) {
           const buffer = Buffer.from(await response.arrayBuffer());
-
-          // 检查图片是否有效（大于5KB且是image类型）
           const contentType = response.headers.get('content-type') || '';
           if (buffer.length > 5000 && (contentType.includes('image') || contentType === 'application/octet-stream')) {
-            const ext = contentType.includes('jpeg') ? 'jpg' :
-                       contentType.includes('png') ? 'png' :
-                       contentType.includes('webp') ? 'webp' : 'jpg';
+            const ext = contentType.includes('jpeg') ? 'jpg' : contentType.includes('png') ? 'png' : contentType.includes('webp') ? 'webp' : 'jpg';
             const fileName = `ai-cover-${Date.now()}-${seed}.${ext}`;
             const filePath = path.join(uploadDir, 'images', fileName);
             fs.writeFileSync(filePath, buffer);
 
-            console.log(`[AI Cover] 成功 (服务 ${i + 1})! 大小: ${buffer.length} bytes`);
+            console.log(`[AI Cover] 成功 (${svc.label})! 大小: ${buffer.length} bytes`);
+            progress.push({ stage: svc.label, status: 'success', message: '生成成功！' });
+            usedModel = svc.label;
             return res.json({
               success: true,
-              data: { url: `/uploads/images/${fileName}` }
+              data: { url: `/uploads/images/${fileName}` },
+              progress: progress,
+              usedModel: usedModel
             });
           } else {
-            console.log(`[AI Cover] 服务 ${i + 1} 返回图片太小或类型不对: ${contentType}, ${buffer.length} bytes`);
+            console.log(`[AI Cover] ${svc.label} 图片不符合要求: ${contentType}, ${buffer.length} bytes`);
+            progress.push({ stage: svc.label, status: 'failed', message: '图片不符合要求' });
           }
         } else {
-          console.log(`[AI Cover] 服务 ${i + 1} 返回状态: ${response.status}`);
+          console.log(`[AI Cover] ${svc.label} 返回状态: ${response.status}`);
+          progress.push({ stage: svc.label, status: 'failed', message: `服务返回 ${response.status}` });
         }
       } catch (err) {
-        console.log(`[AI Cover] 服务 ${i + 1} 出错: ${err.message}`);
+        console.log(`[AI Cover] ${svc.label} 出错: ${err.message}`);
+        progress.push({ stage: svc.label, status: 'failed', message: `网络请求失败` });
       }
     }
 
-    // 最终降级：本地生成高质量渐变封面
+    // 最终降级：本地生成渐变封面
     console.log(`[AI Cover] 所有远程服务失败，使用本地方案: 渐变SVG`);
+    progress.push({ stage: 'local-fallback', status: 'info', message: '远程服务不可用，使用本地渐变图' });
     const gradientUrl = generateGradientCover(categoryName.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0));
+    usedModel = 'local-gradient';
 
     return res.json({
       success: true,
-      data: { url: gradientUrl }
+      data: { url: gradientUrl },
+      progress: progress,
+      usedModel: usedModel
     });
 
   } catch (error) {
     console.error('[AI Cover] 失败:', error.message);
+    progress.push({ stage: 'error', status: 'error', message: `异常: ${error.message}` });
 
     const seed = (req.body && req.body.categoryName || 'default').split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
     const fallbackUrl = generateGradientCover(seed);
 
     res.json({
       success: true,
-      data: { url: fallbackUrl }
+      data: { url: fallbackUrl },
+      progress: progress,
+      usedModel: 'local-gradient'
     });
   }
 });

@@ -1,7 +1,9 @@
 import { matchIconByKeywords, iconPresets } from './iconPresets';
 
-// 统一的请求超时（封面图生图可能需要更长时间）
-const REQUEST_TIMEOUT_MS = 20000;
+// 封面图请求超时（AI 生图可能需要几十秒）
+const COVER_TIMEOUT_MS = 60000;
+// 图标请求超时
+const ICON_TIMEOUT_MS = 10000;
 
 async function fetchWithTimeout(
   url: string,
@@ -25,28 +27,38 @@ async function fetchWithTimeout(
 
 /**
  * 生成封面图
- * 策略：优先调用后端 API（使用 Pollinations.ai AI 生图 + LoremFlickr + 渐变SVG 兜底）
+ * 策略：优先调用后端 API（GeekAI gpt-image-2 -> z-image-turbo -> Pollinations.ai -> LoremFlickr -> 渐变SVG）
+ * @param onProgress - 可选的进度回调，用于 UI 展示当前状态
  */
 export async function generateCoverImage(
   categoryName: string,
-  description: string
+  description: string,
+  onProgress?: (message: string, usedModel?: string) => void
 ): Promise<string> {
   try {
     console.log(`[aiGenerator] 请求封面图: ${categoryName}`);
+    if (onProgress) onProgress('正在请求服务器生成图片...');
+
     const response = await fetchWithTimeout('/api/ai/generate-cover', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ categoryName, description })
-    }, REQUEST_TIMEOUT_MS);
+    }, COVER_TIMEOUT_MS);
 
     const data = await response.json();
     if (data.success && data.data && data.data.url) {
-      console.log(`[aiGenerator] 封面图成功: ${data.data.url}`);
+      console.log(`[aiGenerator] 封面图成功: ${data.data.url}, 使用模型: ${data.usedModel}`);
+      // 展示服务端返回的进度信息供前端展示
+      if (data.progress && data.progress.length > 0) {
+        const lastStep = data.progress[data.progress.length - 1];
+        if (onProgress) onProgress(lastStep.message, data.usedModel);
+      }
       return data.data.url;
     }
     throw new Error(`API 响应异常: ${JSON.stringify(data)}`);
   } catch (error) {
     console.warn('[aiGenerator] 封面图 API 失败，使用本地渐变:', error);
+    if (onProgress) onProgress('请求超时或失败，使用本地渐变图');
     return generateLocalFallback(categoryName);
   }
 }

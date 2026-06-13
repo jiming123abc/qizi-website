@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿import { useState, useEffect } from 'react';
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿import { useState, useEffect } from 'react';
 import { Plus, GripVertical, ChevronUp, ChevronDown, Edit2, Trash2, Image, AlertCircle, Upload, Link as LinkIcon, Save, X, Sparkles } from 'lucide-react';
 import { getCategoriesWithDetails, addCategoryWithDetails, updateCategoryDetails, deleteCategoryWithDetails, CategoryWithDetails, updateCategoriesSortOrder } from '../../data/store';
 import { uploadImage } from '../../lib/ossUtils';
@@ -13,6 +13,7 @@ export function CategoriesAdmin() {
   const [coverImageSource, setCoverImageSource] = useState<'upload' | 'url'>('upload');
   const [isLoading, setIsLoading] = useState(false);
   const [isGeneratingCover, setIsGeneratingCover] = useState(false);
+  const [coverGenerationMessage, setCoverGenerationMessage] = useState('');
   const [isGeneratingIcon, setIsGeneratingIcon] = useState(false);
 
   const [formData, setFormData] = useState({
@@ -90,14 +91,22 @@ export function CategoriesAdmin() {
     }
 
     setIsGeneratingCover(true);
+    setCoverGenerationMessage('正在请求服务器生成图片...');
     try {
-      const url = await generateCoverImage(formData.name, formData.description);
+      const url = await generateCoverImage(
+        formData.name,
+        formData.description,
+        (msg) => setCoverGenerationMessage(msg)
+      );
       setFormData(prev => ({ ...prev, coverImage: url }));
+      setCoverGenerationMessage('生成成功！');
     } catch (error) {
       console.error('生成封面失败:', error);
       alert('生成失败，请检查网络或重试；系统已自动使用渐变图作为兜底。');
     } finally {
       setIsGeneratingCover(false);
+      // 3 秒后清除消息
+      setTimeout(() => setCoverGenerationMessage(''), 3000);
     }
   };
 
@@ -317,6 +326,15 @@ export function CategoriesAdmin() {
                     )}
                   </button>
                 </div>
+
+                {coverGenerationMessage && (
+                  <div className="mb-3">
+                    <p className="text-xs text-on-surface-variant">
+                      {isGeneratingCover ? '⏳ ' : '✅ '}
+                      {coverGenerationMessage}
+                    </p>
+                  </div>
+                )}
 
                 {coverImageSource === 'upload' ? (
                   <div className="relative">
