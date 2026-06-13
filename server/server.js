@@ -1415,7 +1415,21 @@ app.post('/api/ai/generate-cover', async (req, res) => {
     const seed = Math.floor(Math.random() * 10000000);
     console.log(`[AI Cover] 生成: categoryName=${categoryName}, seed=${seed}`);
 
-    const zhPrompt = `${categoryName},${description || ''},专业摄影,高清,1200x800,电影感`;
+    // ============ 根据 imageType 确定宽高比例 ============
+    // cover(16:9) - 分类卡片封面
+    // hero(16:9) - 首页 Hero 轮播图
+    // share(1:1) - 分享缩略图
+    const imageType = req.body.imageType || 'cover';
+    const typeConfig = {
+      cover: { width: 1024, height: 576 },
+      hero:  { width: 1280, height: 720 },
+      share: { width: 1024, height: 1024 },
+    };
+    const { width, height } = typeConfig[imageType] || typeConfig.cover;
+    console.log(`[AI Cover] imageType=${imageType}, 分辨率: ${width}x${height}`);
+
+    // 蓝紫科技风 prompt
+    const zhPrompt = `${categoryName},${description || ''},蓝紫科技风,赛博朋克风格,霓虹光效,未来科技感,深色背景,高清质感`;
 
     // ============ 步骤 1 & 2: GeekAI 两级模型链 ============
     const geekAIKey = process.env.GEEKAI_API_KEY;
@@ -1432,7 +1446,7 @@ app.post('/api/ai/generate-cover', async (req, res) => {
         console.log(`[AI Cover] 尝试 GeekAI ${model.label} (${model.name})...`);
         progress.push({ stage: model.label, status: 'requesting', message: `正在使用 ${model.label} 生成图片...` });
 
-        const result = await callGeekAIModel(model.name, zhPrompt, model.quality, '1024x1024', geekAIKey, model.timeout);
+        const result = await callGeekAIModel(model.name, zhPrompt, model.quality, `${width}x${height}`, geekAIKey, model.timeout);
 
         if (result.success) {
           console.log(`[AI Cover] ${model.label} 返回图片 URL: ${result.url.substring(0, 60)}...`);
@@ -1464,14 +1478,10 @@ app.post('/api/ai/generate-cover', async (req, res) => {
     }
 
     // ============ 降级链：免费服务 ============
-    // Pollinations.ai - AI 生成图片（中文 prompt）
-    // Pollinations.ai - 使用简短 prompt
-    // LoremFlickr 兜底
-    // 渐变色 SVG 兜底
     const coverServices = [
-      { label: 'Pollinations.ai (完整描述', getUrl: () => `https://image.pollinations.ai/prompt/${encodeURIComponent(zhPrompt)}?width=1200&height=800&nologo=true&enhance=true&seed=${seed}` },
-      { label: 'Pollinations.ai (简短描述)', getUrl: () => `https://image.pollinations.ai/prompt/${encodeURIComponent(categoryName)}?width=1200&height=800&nologo=true&seed=${seed + 1}` },
-      { label: 'LoremFlickr', getUrl: () => `https://loremflickr.com/1200/800/${encodeURIComponent(categoryName)}?lock=${seed + 2}` },
+      { label: 'Pollinations.ai (完整描述)', getUrl: () => `https://image.pollinations.ai/prompt/${encodeURIComponent(zhPrompt)}?width=${width}&height=${height}&nologo=true&enhance=true&seed=${seed}` },
+      { label: 'Pollinations.ai (简短描述)', getUrl: () => `https://image.pollinations.ai/prompt/${encodeURIComponent(categoryName)}?width=${width}&height=${height}&nologo=true&seed=${seed + 1}` },
+      { label: 'LoremFlickr', getUrl: () => `https://loremflickr.com/${width}/${height}/${encodeURIComponent(categoryName)}?lock=${seed + 2}` },
     ];
 
     for (let i = 0; i < coverServices.length; i++) {

@@ -29,26 +29,30 @@ async function fetchWithTimeout(
  * 生成封面图
  * 策略：优先调用后端 API（GeekAI gpt-image-2 -> z-image-turbo -> Pollinations.ai -> LoremFlickr -> 渐变SVG）
  * @param onProgress - 可选的进度回调，用于 UI 展示当前状态
+ * @param imageType - 图片用途类型:
+ *   - 'cover' 分类卡片封面 (1024x576, 16:9)
+ *   - 'hero' 首页 Hero 轮播图 (1280x720, 16:9)
+ *   - 'share' 分享缩略图 (1024x1024, 1:1)
  */
 export async function generateCoverImage(
   categoryName: string,
   description: string,
-  onProgress?: (message: string, usedModel?: string) => void
+  onProgress?: (message: string, usedModel?: string) => void,
+  imageType: 'cover' | 'hero' | 'share' = 'cover'
 ): Promise<string> {
   try {
-    console.log(`[aiGenerator] 请求封面图: ${categoryName}`);
+    console.log(`[aiGenerator] 请求封面图: ${categoryName}, 类型: ${imageType}`);
     if (onProgress) onProgress('正在请求服务器生成图片...');
 
     const response = await fetchWithTimeout('/api/ai/generate-cover', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ categoryName, description })
+      body: JSON.stringify({ categoryName, description, imageType })
     }, COVER_TIMEOUT_MS);
 
     const data = await response.json();
     if (data.success && data.data && data.data.url) {
       console.log(`[aiGenerator] 封面图成功: ${data.data.url}, 使用模型: ${data.usedModel}`);
-      // 展示服务端返回的进度信息供前端展示
       if (data.progress && data.progress.length > 0) {
         const lastStep = data.progress[data.progress.length - 1];
         if (onProgress) onProgress(lastStep.message, data.usedModel);
@@ -61,6 +65,28 @@ export async function generateCoverImage(
     if (onProgress) onProgress('请求超时或失败，使用本地渐变图');
     return generateLocalFallback(categoryName);
   }
+}
+
+/**
+ * 生成首页 Hero 轮播图（便捷函数，自动使用 hero 类型 1280x720）
+ */
+export async function generateHeroSlideImage(
+  title: string,
+  subtitle: string,
+  onProgress?: (message: string, usedModel?: string) => void
+): Promise<string> {
+  return generateCoverImage(title, subtitle, onProgress, 'hero');
+}
+
+/**
+ * 生成微信分享缩略图（便捷函数，自动使用 share 类型 1024x1024）
+ */
+export async function generateShareImage(
+  title: string,
+  description: string,
+  onProgress?: (message: string, usedModel?: string) => void
+): Promise<string> {
+  return generateCoverImage(title, description, onProgress, 'share');
 }
 
 /**

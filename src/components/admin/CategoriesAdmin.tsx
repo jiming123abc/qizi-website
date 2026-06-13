@@ -96,7 +96,8 @@ export function CategoriesAdmin() {
       const url = await generateCoverImage(
         formData.name,
         formData.description,
-        (msg) => setCoverGenerationMessage(msg)
+        (msg) => setCoverGenerationMessage(msg),
+        'cover'
       );
       setFormData(prev => ({ ...prev, coverImage: url }));
       setCoverGenerationMessage('生成成功！');

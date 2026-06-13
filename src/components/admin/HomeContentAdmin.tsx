@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Save, Image, Link, FileImage, Loader2, Plus, X, Check, AlertCircle } from 'lucide-react';
+import { Save, Image, Link, FileImage, Loader2, Plus, X, Check, AlertCircle, Sparkles } from 'lucide-react';
 import { getHomeContent, saveHomeContent, HomeContent, getPortfolioItems, PortfolioItem } from '../../data/store';
 import { uploadImage, UploadError } from '../../lib/ossUtils';
+import { generateHeroSlideImage, generateShareImage } from '../../lib/aiGenerator';
 
 export function HomeContentAdmin() {
   const [content, setContent] = useState<HomeContent>({
@@ -28,6 +29,10 @@ export function HomeContentAdmin() {
     message: ''
   });
   const [portfolioItems, setPortfolioItems] = useState<PortfolioItem[]>([]);
+  const [isGeneratingSlide, setIsGeneratingSlide] = useState<number | null>(null);
+  const [slideGenMessage, setSlideGenMessage] = useState('');
+  const [isGeneratingHeroImage, setIsGeneratingHeroImage] = useState(false);
+  const [heroImageGenMessage, setHeroImageGenMessage] = useState('');
 
   useEffect(() => {
     const loadContent = async () => {
@@ -135,6 +140,54 @@ export function HomeContentAdmin() {
         portfolioId: item.id
       };
       setContent(prev => ({ ...prev, heroSlides: newSlides }));
+    }
+  };
+
+  const handleGenerateSlideImage = async (index: number) => {
+    const slide = content.heroSlides[index];
+    const title = slide.title || content.heroTitle || '数字人';
+    const subtitle = slide.label || content.heroSubtitle || '实时渲染';
+
+    setIsGeneratingSlide(index);
+    setSlideGenMessage('正在使用 AI 生成轮播图...');
+    try {
+      const url = await generateHeroSlideImage(
+        title,
+        subtitle,
+        (msg) => setSlideGenMessage(msg)
+      );
+      const newSlides = [...content.heroSlides];
+      newSlides[index] = { ...newSlides[index], img: url };
+      setContent(prev => ({ ...prev, heroSlides: newSlides }));
+      setSlideGenMessage('生成成功！');
+    } catch (error) {
+      console.error('生成轮播图失败:', error);
+      alert('生成失败，使用本地渐变图');
+    } finally {
+      setIsGeneratingSlide(null);
+      setTimeout(() => setSlideGenMessage(''), 3000);
+    }
+  };
+
+  const handleGenerateShareImage = async () => {
+    const title = content.shareTitle || '大连柒子文化';
+    const desc = content.shareDescription || '诚信立足 创新致远';
+    setIsGeneratingHeroImage(true);
+    setHeroImageGenMessage('正在使用 AI 生成分享缩略图...');
+    try {
+      const url = await generateShareImage(
+        title,
+        desc,
+        (msg) => setHeroImageGenMessage(msg)
+      );
+      setContent(prev => ({ ...prev, heroImage: url }));
+      setHeroImageGenMessage('生成成功！');
+    } catch (error) {
+      console.error('生成分享缩略图失败:', error);
+      alert('生成失败，请重试');
+    } finally {
+      setIsGeneratingHeroImage(false);
+      setTimeout(() => setHeroImageGenMessage(''), 3000);
     }
   };
 
@@ -276,7 +329,31 @@ export function HomeContentAdmin() {
                               <Link className="w-3 h-3" />
                               URL
                             </button>
+                            <button
+                              onClick={() => handleGenerateSlideImage(index)}
+                              disabled={isGeneratingSlide === index}
+                              className="flex items-center gap-2 px-3 py-1 rounded border text-xs transition-all bg-gradient-to-r from-purple-500/20 to-pink-500/20 border-purple-500/50 text-purple-400 hover:from-purple-500/30 hover:to-pink-500/30 disabled:opacity-50"
+                            >
+                              {isGeneratingSlide === index ? (
+                                <>
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                  生成中...
+                                </>
+                              ) : (
+                                <>
+                                  <Sparkles className="w-3 h-3" />
+                                  AI生成
+                                </>
+                              )}
+                            </button>
                           </div>
+
+                          {isGeneratingSlide === index && slideGenMessage && (
+                            <div className="mt-2 text-xs text-purple-400 flex items-center gap-2">
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                              {slideGenMessage}
+                            </div>
+                          )}
 
                           {slideImageSource === 'upload' && (
                             <>
@@ -463,7 +540,31 @@ export function HomeContentAdmin() {
                     <Link className="w-3 h-3" />
                     URL
                   </button>
+                  <button
+                    onClick={handleGenerateShareImage}
+                    disabled={isGeneratingHeroImage}
+                    className="flex items-center gap-2 px-3 py-1 rounded border text-xs transition-all bg-gradient-to-r from-purple-500/20 to-pink-500/20 border-purple-500/50 text-purple-400 hover:from-purple-500/30 hover:to-pink-500/30 disabled:opacity-50"
+                  >
+                    {isGeneratingHeroImage ? (
+                      <>
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                        生成中...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-3 h-3" />
+                        AI生成
+                      </>
+                    )}
+                  </button>
                 </div>
+
+                {isGeneratingHeroImage && heroImageGenMessage && (
+                  <div className="text-xs text-purple-400 flex items-center gap-2">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    {heroImageGenMessage}
+                  </div>
+                )}
 
                 {heroImageSource === 'upload' && (
                   <>
