@@ -24,3 +24,9 @@ coverage/
 .trae/
 deploy-files/
 temp_*
+
+# 本地上传文件
+public/uploads/
+
+# Windows系统文件
+NUL

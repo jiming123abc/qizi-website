@@ -1337,7 +1337,7 @@ function generateGradientCover(seed) {
   return `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svg)))}`;
 }
 
-// AI 生成封面图 - 使用 Pollinations.ai + 多级降级
+// AI 生成封面图 - 使用 GeekAI (CogView-4) + 多级降级
 app.post('/api/ai/generate-cover', async (req, res) => {
   try {
     const { categoryName, description } = req.body;
@@ -1350,14 +1350,93 @@ app.post('/api/ai/generate-cover', async (req, res) => {
     const combinedKeywords = `${categoryName} ${description || ''}`.trim();
     console.log(`[AI Cover] 生成: categoryName=${categoryName}, seed=${seed}`);
 
-    // 构建 Pollinations.ai 的英文 prompt（AI 生成图片对英文 prompt 效果更好）
-    // 先尝试使用原始中文关键词，然后是英文翻译
+    // 中文 prompt（CogView-4 对中文理解好）
     const zhPrompt = `${categoryName},${description || ''},专业摄影,高清,1200x800,电影感`;
 
-    // 图片服务列表（按优先级）
-    // 1. Pollinations.ai - 免费 AI 生图，效果最好
-    // 2. LoremFlickr - 关键词搜索真实图片
-    // 3. 渐变色 SVG 兜底
+    // ============ 步骤 1: GeekAI CogView-4（首选，付费 API，高质量 AI 生成） ============
+    const geekAIKey = process.env.GEEKAI_API_KEY;
+    if (geekAIKey) {
+      console.log(`[AI Cover] 尝试服务 1 (GeekAI CogView-4)...`);
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 25000); // 生图需要较长时间
+
+        const geekResponse = await fetch('https://geekai.co/api/v1/images/generations', {
+          method: 'POST',
+          signal: controller.signal,
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${geekAIKey}`
+          },
+          body: JSON.stringify({
+            model: 'cogview-4',
+            prompt: zhPrompt,
+            size: '1024x1024',
+            quality: 'hd',
+            watermark: false,
+            n: 1,
+            response_format: 'url'
+          })
+        });
+
+        clearTimeout(timeout);
+
+        if (geekResponse.ok) {
+          const geekData = await geekResponse.json();
+          if (geekData && geekData.data && geekData.data[0] && geekData.data[0].url) {
+            const imageUrl = geekData.data[0].url;
+            console.log(`[AI Cover] GeekAI 返回图片 URL: ${imageUrl.substring(0, 60)}...`);
+
+            // 下载 GeekAI 图片到本地
+            try {
+              const imgController = new AbortController();
+              const imgTimeout = setTimeout(() => imgController.abort(), 15000);
+              const imgResp = await fetch(imageUrl, { signal: imgController.signal });
+              clearTimeout(imgTimeout);
+
+              if (imgResp.ok) {
+                const buffer = Buffer.from(await imgResp.arrayBuffer());
+                const contentType = imgResp.headers.get('content-type') || 'image/jpeg';
+                if (buffer.length > 5000) {
+                  const ext = contentType.includes('png') ? 'png' :
+                              contentType.includes('webp') ? 'webp' : 'jpg';
+                  const fileName = `ai-cover-${Date.now()}-${seed}.${ext}`;
+                  const filePath = path.join(uploadDir, 'images', fileName);
+                  fs.writeFileSync(filePath, buffer);
+
+                  console.log(`[AI Cover] 成功 (服务 1 - GeekAI CogView-4)! 大小: ${buffer.length} bytes`);
+                  return res.json({
+                    success: true,
+                    data: { url: `/uploads/images/${fileName}` }
+                  });
+                } else {
+                  console.log(`[AI Cover] GeekAI 下载图片过小: ${buffer.length} bytes`);
+                }
+              } else {
+                console.log(`[AI Cover] GeekAI 下载图片失败: ${imgResp.status}`);
+              }
+            } catch (dlErr) {
+              console.log(`[AI Cover] GeekAI 下载图片出错: ${dlErr.message}`);
+            }
+          } else {
+            console.log(`[AI Cover] GeekAI 返回数据格式异常: ${JSON.stringify(geekData).substring(0, 120)}`);
+          }
+        } else {
+          const errText = await geekResponse.text().catch(() => '无法读取响应');
+          console.log(`[AI Cover] GeekAI 失败: HTTP ${geekResponse.status} - ${errText.substring(0, 150)}`);
+        }
+      } catch (err) {
+        console.log(`[AI Cover] 服务 1 (GeekAI) 出错: ${err.message}`);
+      }
+    } else {
+      console.log(`[AI Cover] 未配置 GEEKAI_API_KEY，跳过 GeekAI 服务`);
+    }
+
+    // ============ 降级链（原有逻辑保持不变） ============
+    // 2. Pollinations.ai - 免费 AI 生图
+    // 3. Pollinations.ai - 简短 prompt
+    // 4. LoremFlickr - 关键词搜索真实图片
+    // 5. 渐变色 SVG 兜底
     const coverServices = [
       // Pollinations.ai - AI 生成图片（中文 prompt）
       () => `https://image.pollinations.ai/prompt/${encodeURIComponent(zhPrompt)}?width=1200&height=800&nologo=true&enhance=true&seed=${seed}`,
