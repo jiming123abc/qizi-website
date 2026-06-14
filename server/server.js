@@ -559,7 +559,7 @@ app.post('/api/upload/from-url', express.json({ limit: '1mb' }), async (req, res
 
     console.log(`[upload-from-url] 下载: ${url.substring(0, 100)}`);
 
-    // 1. 从远程URL下载（30秒超时，最多重试1次）
+    // 1. 从远程URL下载（60秒超时，最多重试1次）
     let buffer;
     let contentType = '';
     const maxAttempts = 2;
@@ -568,7 +568,7 @@ app.post('/api/upload/from-url', express.json({ limit: '1mb' }), async (req, res
     for (let attempt = 1; attempt <= maxAttempts && !downloadSuccess; attempt++) {
       try {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 30000);
+        const timeout = setTimeout(() => controller.abort(), 60000);
         const response = await fetch(url, {
           signal: controller.signal,
           headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }

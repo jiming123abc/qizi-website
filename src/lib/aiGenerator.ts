@@ -1,8 +1,8 @@
 import { matchIconByKeywords, iconPresets } from './iconPresets';
 import { uploadImage, UploadResult } from './ossUtils';
 
-// 封面图请求超时
-const COVER_TIMEOUT_MS = 30000;
+// 封面图请求超时（AI 生图通常需要 25-40 秒）
+const COVER_TIMEOUT_MS = 60000;
 // 图标请求超时
 const ICON_TIMEOUT_MS = 10000;
 
