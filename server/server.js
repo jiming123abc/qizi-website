@@ -547,6 +547,20 @@ app.post('/api/upload/image', upload.single('file'), async (req, res) => {
   }
 });
 
+// 共享函数：将 buffer 上传到 OSS，返回 URL
+// folder: OSS 子目录（如 'images' / 'snapshots'）
+// ext: 文件扩展名（'jpg' / 'png' / 'webp'）
+// prefix: 文件名前缀，方便辨识
+async function uploadBufferToOSS(buffer, folder, ext, prefix = 'upload') {
+  if (!isOSSConfigured || !ossClient) {
+    throw new Error('OSS 未配置');
+  }
+  const fileName = `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  const ossFileName = `${folder}/${fileName}`;
+  const result = await ossClient.put(ossFileName, buffer);
+  return result.url;
+}
+
 // 从远程URL下载图片 → 压缩 → 上传OSS
 // 用途：当浏览器因CORS限制无法直接fetch远程图片URL时，
 // 把URL发送到此接口，由服务器代劳上传到OSS
@@ -652,6 +666,114 @@ app.post('/api/upload/from-url', express.json({ limit: '1mb' }), async (req, res
   } catch (error) {
     console.error('[upload-from-url] 异常:', error.message);
     res.status(500).json({ error: '上传失败: ' + error.message });
+  }
+});
+
+// 从视频中截取 N 帧画面，上传到 OSS，返回图片 URL 数组
+// 请求：POST /api/video/snapshots { videoUrl, count? }
+// 响应：{ success, urls, message? }
+app.post('/api/video/snapshots', express.json({ limit: '1mb' }), async (req, res) => {
+  const tempFiles = [];
+  try {
+    const { videoUrl, count = 5 } = req.body;
+    if (!videoUrl) {
+      return res.status(400).json({ success: false, message: '缺少参数 videoUrl' });
+    }
+    if (!isOSSConfigured || !ossClient) {
+      return res.status(500).json({ success: false, message: 'OSS 未配置，无法保存截图' });
+    }
+
+    console.log(`[video-snapshots] 视频: ${videoUrl.substring(0, 120)}, 截图数量: ${count}`);
+
+    // 1. 获取视频时长（ffprobe），失败时降级为固定时间点
+    let duration = 0;
+    try {
+      duration = await new Promise((resolve, reject) => {
+        const probeTimeout = setTimeout(() => reject(new Error('ffprobe timeout')), 20000);
+        ffmpeg.ffprobe(videoUrl, (err, metadata) => {
+          clearTimeout(probeTimeout);
+          if (err) return reject(err);
+          const d = metadata?.format?.duration;
+          resolve(d ? parseFloat(d) : 0);
+        });
+      });
+    } catch (err) {
+      console.log(`[video-snapshots] ffprobe 失败: ${err.message}，使用固定时间点`);
+    }
+
+    // 2. 计算截图时间点（秒）
+    let timestamps;
+    if (duration > 0) {
+      // 避开首尾 5%，均匀分布
+      const step = duration * 0.9 / (count + 1);
+      const first = duration * 0.05;
+      timestamps = [];
+      for (let i = 1; i <= count; i++) {
+        timestamps.push(Math.min(Math.max(first + i * step, 0.5), Math.max(duration - 0.5, 0.5)));
+      }
+    } else {
+      // 兜底固定时间点
+      timestamps = [1, 3, 5, 7, 9].slice(0, count);
+    }
+    console.log(`[video-snapshots] 时长 ${duration}s，截图时间点: ${timestamps.map(t => t.toFixed(1)).join(', ')}`);
+
+    // 3. 逐帧截取 + 上传
+    const urls = [];
+    for (let i = 0; i < timestamps.length; i++) {
+      const t = timestamps[i];
+      const outputPath = path.join(uploadDir, `snap-${Date.now()}-${i}.jpg`);
+      tempFiles.push(outputPath);
+      try {
+        await new Promise((resolve, reject) => {
+          const frameTimeout = setTimeout(() => reject(new Error('截图超时')), 25000);
+          ffmpeg(videoUrl)
+            .seekInput(t)
+            .frames(1)
+            .outputOptions([
+              '-vf', 'scale=1280:-1',
+              '-q:v', '3',
+              '-y'
+            ])
+            .on('end', () => { clearTimeout(frameTimeout); resolve(); })
+            .on('error', (e) => { clearTimeout(frameTimeout); reject(e); })
+            .save(outputPath);
+        });
+
+        if (!fs.existsSync(outputPath) || fs.statSync(outputPath).size < 1000) {
+          throw new Error('截图文件过小或不存在');
+        }
+
+        const buffer = fs.readFileSync(outputPath);
+        const ossUrl = await uploadBufferToOSS(buffer, 'snapshots', 'jpg', `frame-${i + 1}`);
+        urls.push(ossUrl);
+        console.log(`[video-snapshots] ✅ 第 ${i + 1} 张 (${t.toFixed(1)}s) 上传: ${ossUrl.substring(0, 60)}`);
+
+        try { fs.unlinkSync(outputPath); } catch (e) { /* 忽略 */ }
+        const idx = tempFiles.indexOf(outputPath);
+        if (idx >= 0) tempFiles.splice(idx, 1);
+      } catch (err) {
+        console.log(`[video-snapshots] ❌ 第 ${i + 1} 张 (${t.toFixed(1)}s) 失败: ${err.message}`);
+        try {
+          if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+        } catch (e) { /* 忽略 */ }
+      }
+    }
+
+    if (urls.length === 0) {
+      return res.status(500).json({ success: false, message: '所有截图均失败，请确认视频地址有效' });
+    }
+
+    res.json({ success: true, urls });
+  } catch (error) {
+    console.error('[video-snapshots] 异常:', error.message);
+    res.status(500).json({ success: false, message: '截图失败: ' + error.message });
+  } finally {
+    // 最后兜底清理临时文件
+    for (const p of tempFiles) {
+      try {
+        if (fs.existsSync(p)) fs.unlinkSync(p);
+      } catch (e) { /* 忽略 */ }
+    }
   }
 });
 

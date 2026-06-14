@@ -78,6 +78,12 @@ export function PortfolioAdmin() {
 
   const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
 
+  // 视频封面截图相关 state
+  const [capturedFrames, setCapturedFrames] = useState<string[]>([]);
+  const [isCapturing, setIsCapturing] = useState(false);
+  const [captureMessage, setCaptureMessage] = useState<string>('');
+  const [selectedFrameIndex, setSelectedFrameIndex] = useState<number | null>(null);
+
   const [formData, setFormData] = useState({
     title: '',
     category: '',
@@ -225,9 +231,54 @@ export function PortfolioAdmin() {
     setDragOverIndex(null);
   };
 
+  const resetCaptureState = () => {
+    setCapturedFrames([]);
+    setIsCapturing(false);
+    setCaptureMessage('');
+    setSelectedFrameIndex(null);
+  };
+
+  const handleCaptureFrames = async () => {
+    if (!formData.videoUrl) {
+      alert('请先上传视频或填写视频地址');
+      return;
+    }
+    setIsCapturing(true);
+    setCaptureMessage('正在分析视频并截取画面，请稍候...');
+    setCapturedFrames([]);
+    setSelectedFrameIndex(null);
+    try {
+      const response = await fetch('/api/video/snapshots', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ videoUrl: formData.videoUrl, count: 5 })
+      });
+      const data = await response.json();
+      if (data.success && data.urls && data.urls.length > 0) {
+        setCapturedFrames(data.urls);
+        setCaptureMessage(`已截取 ${data.urls.length} 张画面，点击选择作为封面`);
+      } else {
+        setCaptureMessage(data.message || '截图失败');
+      }
+    } catch (error) {
+      console.error('视频截图失败:', error);
+      setCaptureMessage('截图失败: ' + (error instanceof Error ? error.message : String(error)));
+    } finally {
+      setIsCapturing(false);
+    }
+  };
+
+  const handleSelectFrame = (index: number, url: string) => {
+    setSelectedFrameIndex(index);
+    setFormData(prev => ({ ...prev, img: url }));
+    setImgSourceType('url');
+    setCaptureMessage(`已选择第 ${index + 1} 张画面作为封面`);
+  };
+
   const handleCreate = () => {
     setImgSourceType('upload');
     setVideoSourceType('upload');
+    resetCaptureState();
     setFormData({
       title: '',
       category: '', // 暂时留空，等 categories 加载完成后由 useEffect 设置
@@ -248,6 +299,7 @@ export function PortfolioAdmin() {
   const handleEdit = (item: PortfolioItem) => {
     setImgSourceType(item.img && item.img.startsWith('http') ? 'url' : 'upload');
     setVideoSourceType(item.videoUrl && item.videoUrl.startsWith('http') ? 'url' : 'upload');
+    resetCaptureState();
     setEditingItem(item);
     setFormData({
       title: item.title || '',
@@ -1094,6 +1146,82 @@ export function PortfolioAdmin() {
                           />
                         </div>
                       </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 视频封面截图 */}
+                {formData.videoUrl && (
+                  <div className="mt-5 p-5 rounded-xl bg-surface-container border border-white/10">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-label text-on-surface-variant">🎬 截取视频画面作为封面</span>
+                      </div>
+                      <button
+                        onClick={handleCaptureFrames}
+                        disabled={isCapturing}
+                        className={`px-4 py-2 rounded-lg text-sm transition-all flex items-center gap-2 ${
+                          isCapturing
+                            ? 'bg-surface-container border border-white/10 text-on-surface-variant/50 cursor-not-allowed'
+                            : 'bg-primary hover:bg-primary/90 text-on-primary'
+                        }`}
+                      >
+                        {isCapturing ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            截取中...
+                          </>
+                        ) : (
+                          <>
+                            <span>截取 5 张画面</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    {capturedFrames.length === 0 && !isCapturing && (
+                      <p className="text-xs text-on-surface-variant/60 mt-1">
+                        {captureMessage || '视频上传或填入视频地址后，点击按钮截取 5 张视频画面，选择一张作为作品封面图。'}
+                      </p>
+                    )}
+
+                    {capturedFrames.length > 0 && (
+                      <>
+                        <p className="text-sm text-secondary mb-2">{captureMessage}</p>
+                        <div className="grid grid-cols-5 gap-3">
+                          {capturedFrames.map((url, idx) => (
+                            <div
+                              key={idx}
+                              onClick={() => handleSelectFrame(idx, url)}
+                              className={`relative cursor-pointer overflow-hidden rounded-xl border-2 transition-all group ${
+                                selectedFrameIndex === idx
+                                  ? 'border-primary ring-2 ring-primary shadow-lg shadow-primary/30'
+                                  : 'border-white/10 hover:border-secondary/60 hover:shadow-md'
+                              }`}
+                            >
+                              <img
+                                src={url}
+                                alt={`画面 ${idx + 1}`}
+                                className="w-full aspect-video object-cover"
+                              />
+                              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
+                                {selectedFrameIndex === idx ? (
+                                  <div className="bg-primary text-on-primary text-xs font-bold px-2 py-1 rounded-lg shadow-md">
+                                    ✓ 已选
+                                  </div>
+                                ) : (
+                                  <div className="opacity-0 group-hover:opacity-100 bg-black/50 text-white text-xs px-2 py-1 rounded-lg transition-opacity">
+                                    点击选择
+                                  </div>
+                                )}
+                              </div>
+                              <div className="absolute top-1 left-1 w-6 h-6 rounded-full bg-black/60 text-white text-xs font-bold flex items-center justify-center">
+                                {idx + 1}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </>
                     )}
                   </div>
                 )}
