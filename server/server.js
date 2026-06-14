@@ -559,28 +559,44 @@ app.post('/api/upload/from-url', express.json({ limit: '1mb' }), async (req, res
 
     console.log(`[upload-from-url] 下载: ${url.substring(0, 100)}`);
 
-    // 1. 从远程URL下载（60秒超时，容忍服务器网络慢）
+    // 1. 从远程URL下载（30秒超时，最多重试1次）
     let buffer;
     let contentType = '';
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 60000);
-      const response = await fetch(url, {
-        signal: controller.signal,
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-      });
-      clearTimeout(timeout);
+    const maxAttempts = 2;
+    let downloadSuccess = false;
 
-      if (!response.ok) {
-        console.log(`[upload-from-url] 下载失败: HTTP ${response.status}`);
-        return res.status(400).json({ error: `远程下载失败: HTTP ${response.status}` });
+    for (let attempt = 1; attempt <= maxAttempts && !downloadSuccess; attempt++) {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 30000);
+        const response = await fetch(url, {
+          signal: controller.signal,
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+        });
+        clearTimeout(timeout);
+
+        if (!response.ok) {
+          console.log(`[upload-from-url] 第${attempt}次下载失败: HTTP ${response.status}`);
+          if (attempt < maxAttempts) {
+            console.log(`[upload-from-url] 等待500ms后重试...`);
+            await new Promise(r => setTimeout(r, 500));
+            continue;
+          }
+          return res.status(400).json({ error: `远程下载失败: HTTP ${response.status}` });
+        }
+
+        buffer = Buffer.from(await response.arrayBuffer());
+        contentType = response.headers.get('content-type') || '';
+        downloadSuccess = true;
+      } catch (err) {
+        console.log(`[upload-from-url] 第${attempt}次下载异常: ${err.message}`);
+        if (attempt < maxAttempts) {
+          console.log(`[upload-from-url] 等待500ms后重试...`);
+          await new Promise(r => setTimeout(r, 500));
+          continue;
+        }
+        return res.status(400).json({ error: `远程下载异常: ${err.message}` });
       }
-
-      buffer = Buffer.from(await response.arrayBuffer());
-      contentType = response.headers.get('content-type') || '';
-    } catch (err) {
-      console.log(`[upload-from-url] 下载异常: ${err.message}`);
-      return res.status(400).json({ error: `远程下载异常: ${err.message}` });
     }
 
     if (buffer.length < 100) {

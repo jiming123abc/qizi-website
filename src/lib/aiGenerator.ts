@@ -1,8 +1,8 @@
 import { matchIconByKeywords, iconPresets } from './iconPresets';
 import { uploadImage, UploadResult } from './ossUtils';
 
-// 封面图请求超时（AI 生图可能需要几十秒）
-const COVER_TIMEOUT_MS = 60000;
+// 封面图请求超时
+const COVER_TIMEOUT_MS = 30000;
 // 图标请求超时
 const ICON_TIMEOUT_MS = 10000;
 
@@ -95,7 +95,13 @@ async function fetchWithTimeout(
   timeoutMs: number
 ): Promise<Response> {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const timeoutId = setTimeout(() => {
+    try {
+      controller.abort(new Error(`请求超时 (${timeoutMs}ms): ${url.substring(0, 60)}`));
+    } catch (e) {
+      controller.abort();
+    }
+  }, timeoutMs);
   try {
     const response = await fetch(url, {
       ...options,
@@ -113,9 +119,8 @@ async function fetchWithTimeout(
  * 生成封面图
  * 多级降级策略：
  *   1. 后端 GeekAI API（付费，首选，返回远程URL）
- *   2. 浏览器直接访问 Pollinations.ai（免费AI生图）
- *   3. 浏览器直接访问 Picsum Photos（稳定真实图片）
- *   4. 本地 SVG 渐变（最终兜底）
+ *   2. 浏览器直接访问 Picsum Photos（稳定真实图片）
+ *   3. 本地 SVG 渐变（最终兜底）
  *
  * @param onProgress - 可选的进度回调，用于 UI 展示当前状态
  * @param imageType - 图片用途类型:
@@ -141,7 +146,6 @@ export async function generateCoverImage(
   };
   const { width, height } = sizeMap[imageType] || sizeMap.cover;
   const seed = Math.floor(Math.random() * 10000000);
-  const enPrompt = `professional photography, ${trimmedName} theme, modern design, high quality, 4k`;
 
   console.log(`[aiGenerator] 请求封面图: ${trimmedName}, 类型: ${imageType}`);
 
@@ -162,37 +166,15 @@ export async function generateCoverImage(
     }
     console.log(`[aiGenerator] 后端API返回失败: ${data.message || '未知原因'}`);
   } catch (error) {
-    console.warn('[aiGenerator] 后端API异常:', error);
-  }
-
-  // ========== 第2步：浏览器直接访问 Pollinations.ai（免费AI生图） ==========
-  if (onProgress) onProgress('正在从 Pollinations.ai 生成图片...', 'Pollinations');
-  const pollinationUrls = [
-    `https://image.pollinations.ai/prompt/${encodeURIComponent(enPrompt)}?width=${width}&height=${height}&nologo=true&enhance=true&seed=${seed}`,
-    `https://image.pollinations.ai/prompt/${encodeURIComponent(enPrompt)}?width=${width}&height=${height}&nologo=true&seed=${seed + 1}`,
-  ];
-
-  for (let i = 0; i < pollinationUrls.length; i++) {
-    try {
-      const response = await fetchWithTimeout(pollinationUrls[i], {
-        method: 'GET',
-        headers: { 'User-Agent': 'Mozilla/5.0' }
-      }, 45000);
-
-      if (response.ok) {
-        const blob = await response.blob();
-        if (blob.size > 5000) {
-          console.log(`[aiGenerator] ✅ Pollinations 成功! 大小: ${blob.size} bytes`);
-          if (onProgress) onProgress('生成成功！（AI生图）', 'Pollinations.ai');
-          return pollinationUrls[i]; // 直接返回远程URL
-        }
-      }
-    } catch (err) {
-      console.warn(`[aiGenerator] Pollinations 尝试 ${i+1} 失败:`, err);
+    const msg = error instanceof Error ? error.message : String(error);
+    if (msg.includes('超时')) {
+      console.warn(`[aiGenerator] 后端API超时 (${COVER_TIMEOUT_MS}ms)，继续降级`);
+    } else {
+      console.warn('[aiGenerator] 后端API异常:', msg);
     }
   }
 
-  // ========== 第3步：浏览器直接访问 Picsum Photos（稳定真实图片） ==========
+  // ========== 第2步：浏览器直接访问 Picsum Photos（稳定真实图片） ==========
   if (onProgress) onProgress('正在从 Picsum 获取图片...', 'Picsum');
   try {
     const picsumUrl = `https://picsum.photos/seed/${encodeURIComponent(trimmedName)}${seed}/${width}/${height}`;
@@ -210,7 +192,8 @@ export async function generateCoverImage(
       }
     }
   } catch (err) {
-    console.warn('[aiGenerator] Picsum 失败:', err);
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn('[aiGenerator] Picsum 失败:', msg);
   }
 
   // ========== 最终兜底：本地 SVG 渐变 ==========
