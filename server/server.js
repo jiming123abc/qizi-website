@@ -1573,19 +1573,33 @@ const zh2EnMap = {
   '摄影': 'photography, cinematic',
   '电影': 'cinematic, movie scene',
 
-  // 风格/氛围词
+  // 风格/氛围词（蓝紫色科技风为主）
   '专业': 'professional',
-  '科技': 'technology, tech',
+  '科技': 'technology, tech, futuristic',
+  '科技感': 'futuristic tech, cyberpunk vibe',
   '现代': 'modern, contemporary',
   '明亮': 'bright, well lit',
   '温暖': 'warm, cozy',
   '庄重': 'solemn, formal',
   '大气': 'majestic, grand',
   '清新': 'fresh, vibrant',
-  '精致': 'exquisite, refined',
-  '炫酷': 'cool, futuristic',
+  '精致': 'exquisite, refined, detailed',
+  '炫酷': 'cool, futuristic, neon',
   '活力': 'energetic, dynamic',
   '稳重': 'stable, professional',
+  '蓝紫': 'neon blue purple',
+  '蓝紫色': 'neon blue purple gradient',
+  '深蓝色': 'deep indigo blue',
+  '赛博': 'cyberpunk',
+  '赛博朋克': 'cyberpunk atmosphere',
+  '全息': 'holographic',
+  '未来': 'futuristic, sci-fi',
+  '未来感': 'futuristic atmosphere',
+  '数据': 'data flow, digital',
+  '数据流动': 'holographic data flow',
+  '光效': 'light effects, neon glow',
+  '霓虹': 'neon lighting',
+  '渐变': 'gradient background',
   '蓝色': 'blue theme',
   '绿色': 'green theme',
   '红色': 'red theme',
@@ -1612,31 +1626,31 @@ function translateZhPromptToEnglish(zhText) {
   return keywords.join(', ');
 }
 
-// 根据分类名称获取更精确的英文风格提示词
+// 根据分类名称获取更精确的英文风格提示词 —— 全站统一蓝紫色科技风
 function getEnglishStyleByCategory(categoryName) {
   const nameLower = String(categoryName || '').toLowerCase();
   const styles = [];
 
-  if (nameLower.includes('课程') || nameLower.includes('教育') || nameLower.includes('慕课') || nameLower.includes('mooc') || nameLower.includes('思政')) {
-    styles.push('education classroom', 'modern university campus', 'blue green clean', 'professional lighting', 'cinematic composition');
-  } else if (nameLower.includes('活动') || nameLower.includes('毕业') || nameLower.includes('典礼')) {
-    styles.push('event ceremony', 'warm spotlight', 'stage atmosphere', 'orange red theme', 'energetic vibrant', 'cinematic');
-  } else if (nameLower.includes('人物') || nameLower.includes('专访')) {
-    styles.push('portrait photography', 'professional lighting', 'dark moody', 'documentary style', 'warm tones', 'cinematic');
-  } else if (nameLower.includes('动画') || nameLower.includes('app') || nameLower.includes('演示')) {
-    styles.push('tech demo style', 'interface design', 'motion graphic aesthetic', 'vibrant colors', 'blue cyan theme', 'modern futuristic');
-  } else if (nameLower.includes('商业') || nameLower.includes('宣传') || nameLower.includes('企业') || nameLower.includes('公司')) {
-    styles.push('corporate promotional', 'professional corporate', 'business blue tone', 'modern office building', 'majestic grand', 'corporate identity');
-  } else if (nameLower.includes('党课') || nameLower.includes('党建')) {
+  if (nameLower.includes('党课') || nameLower.includes('党建')) {
     styles.push('red cultural theme', 'solemn formal', 'chinese red element', 'great hall style', 'patriotic atmosphere', 'cinematic');
+  } else if (nameLower.includes('课程') || nameLower.includes('教育') || nameLower.includes('慕课') || nameLower.includes('mooc') || nameLower.includes('思政')) {
+    styles.push('education tech classroom', 'neon blue purple interface', 'holographic display', 'modern university environment', 'cinematic composition', 'professional lighting');
+  } else if (nameLower.includes('活动') || nameLower.includes('毕业') || nameLower.includes('典礼')) {
+    styles.push('cyberpunk ceremony', 'neon blue purple stage', 'holographic spotlight', 'energetic vibrant', 'cinematic', 'futuristic atmosphere');
+  } else if (nameLower.includes('人物') || nameLower.includes('专访')) {
+    styles.push('portrait photography', 'neon blue purple lighting', 'futuristic background', 'professional rim light', 'dark moody', 'cinematic');
+  } else if (nameLower.includes('动画') || nameLower.includes('演示') || nameLower.includes('产品')) {
+    styles.push('tech demo style', 'interface design', 'motion graphic aesthetic', 'neon blue purple', 'modern futuristic', 'vibrant colors');
+  } else if (nameLower.includes('商业') || nameLower.includes('宣传') || nameLower.includes('企业') || nameLower.includes('公司')) {
+    styles.push('corporate tech showcase', 'neon blue purple tone', 'modern glass office', 'data visualization', 'majestic grand', 'cinematic', 'professional');
   } else if (nameLower.includes('专题') || nameLower.includes('纪录片') || nameLower.includes('视频')) {
-    styles.push('documentary film', 'cinematic scene', 'wide angle lens', 'natural light', 'narrative composition', 'film color grading');
+    styles.push('documentary film', 'cinematic scene', 'wide angle lens', 'natural light', 'narrative composition', 'film color grading', 'neon blue purple accent');
   } else if (nameLower.includes('数字人') || nameLower.includes('ai')) {
     styles.push('digital human avatar', 'futuristic cyberpunk', 'holographic interface', 'neon blue purple', 'sci-fi cinematic');
   } else if (nameLower.includes('招生') || nameLower.includes('校园')) {
-    styles.push('university campus', 'youthful energy', 'blue sky modern building', 'professional academic', 'cinematic');
+    styles.push('futuristic university campus', 'neon blue purple ambient', 'modern glass building', 'professional academic', 'cinematic', 'youthful energy');
   } else {
-    styles.push('professional photography', 'modern design', 'bright fresh', 'soft light', 'balanced composition', 'cinematic quality', 'beautiful scene');
+    styles.push('futuristic tech scene', 'neon blue purple gradient', 'cyberpunk atmosphere', 'holographic data flow', 'deep indigo background', 'cinematic lighting', '4k detail', 'digital art', 'glass morphism', 'motion blur light trails');
   }
 
   return styles.join(', ');
@@ -1672,21 +1686,29 @@ app.post('/api/ai/generate-cover', async (req, res) => {
     const { width, height } = typeConfig[imageType] || typeConfig.cover;
     console.log(`[AI Cover] imageType=${imageType}, 分辨率: ${width}x${height}`);
 
-    // 风格描述
+    // 风格描述 —— 全站统一蓝紫色科技风（与网站 UI 风格匹配）
     const nameLower = categoryName.toLowerCase();
     let stylePrompt;
-    if (nameLower.includes('课程') || nameLower.includes('教育')) {
-      stylePrompt = '教育学习风格,教室黑板,科技感学习环境,明亮清新,蓝色与绿色主题,专业教学氛围,高清质感,电影级画面';
-    } else if (nameLower.includes('活动') || nameLower.includes('毕业')) {
-      stylePrompt = '活动庆典风格,温暖聚光灯,舞台氛围,活力四射,橙红色主题,现场感强烈,高清质感,电影级画面';
+    if (nameLower.includes('党课') || nameLower.includes('党建')) {
+      stylePrompt = '党建宣传风格,红色主题,庄重严肃,五星红旗元素,红色建筑背景,正式大气,电影级画面,高清质感';
+    } else if (nameLower.includes('课程') || nameLower.includes('教育') || nameLower.includes('慕课') || nameLower.includes('思政')) {
+      stylePrompt = '教育科技风格,蓝紫色未来课堂,全息投影界面,数据可视化,明亮清新,科技感学习环境,电影级画面,高清质感';
+    } else if (nameLower.includes('活动') || nameLower.includes('毕业') || nameLower.includes('典礼')) {
+      stylePrompt = '科技感活动庆典,蓝紫色舞台氛围,全息聚光灯,活力四射,现代感光效,电影级画面,高清质感';
     } else if (nameLower.includes('人物') || nameLower.includes('专访')) {
-      stylePrompt = '人物摄影风格,专业布光,深色调,纪实摄影风格,温暖柔和,电影级质感,高清,精美构图';
-    } else if (nameLower.includes('商业') || nameLower.includes('企业')) {
-      stylePrompt = '企业宣传片风格,专业大气,商务蓝色调,现代办公楼,稳重专业,高清质感,企业形象,电影级画面';
-    } else if (nameLower.includes('党课') || nameLower.includes('党建')) {
-      stylePrompt = '党建宣传风格,红色主题,庄重严肃,五星红旗元素,红色建筑背景,正式大气,高清质感,电影级画面';
+      stylePrompt = '科技感人物肖像,蓝紫色霓虹背景,专业布光,未来感场景,深色渐变,电影级质感,高清,精美构图';
+    } else if (nameLower.includes('商业') || nameLower.includes('宣传') || nameLower.includes('企业') || nameLower.includes('公司')) {
+      stylePrompt = '科技感企业宣传,蓝紫色商务氛围,数据流动光效,现代感办公楼,稳重专业,电影级画面,高清质感,企业形象';
+    } else if (nameLower.includes('专题') || nameLower.includes('纪录片') || nameLower.includes('视频')) {
+      stylePrompt = '科技感纪录片,蓝紫色氛围,电影级画面,大广角镜头,自然光效,叙事构图,电影调色,高清质感';
+    } else if (nameLower.includes('数字人') || nameLower.includes('ai')) {
+      stylePrompt = '数字人头像,未来感赛博朋克,全息界面,蓝紫色霓虹,科技感电影级画面,高清质感,精致细节';
+    } else if (nameLower.includes('招生') || nameLower.includes('校园')) {
+      stylePrompt = '未来感大学校园,蓝紫色氛围,现代玻璃建筑,专业学术氛围,电影级画面,高清质感,青春活力';
+    } else if (nameLower.includes('动画') || nameLower.includes('演示') || nameLower.includes('产品')) {
+      stylePrompt = '科技感演示,蓝紫霓虹,界面设计,动态视觉美感,现代未来感,鲜艳色彩,电影级画面,高清质感';
     } else {
-      stylePrompt = '专业摄影风格,现代设计,清新明亮,柔和光线,构图平衡,高清质感,精美画面,电影级画面';
+      stylePrompt = '科技感视觉,蓝紫色主题,赛博朋克氛围,数据流动光效,全息界面元素,深蓝色渐变背景,电影级画面,高清质感,精致细节';
     }
 
     const zhPrompt = `${categoryName}${description ? '，' + description : ''}，${stylePrompt}`;
