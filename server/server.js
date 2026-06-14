@@ -41,14 +41,47 @@ const isOSSConfigured =
   process.env.REACT_APP_OSS_BUCKET !== '你的Bucket名称';
 
 // 配置ffmpeg路径（Windows环境可能需要）
-const ffmpegPath = require('ffmpeg-static');
-if (ffmpegPath) {
-  ffmpeg.setFfmpegPath(ffmpegPath);
+// 优先使用系统级 ffmpeg/ffprobe（稳定性更高），回退到 npm 包的静态二进制
+function findExecutable(names) {
+  const { execSync } = require('child_process');
+  for (const name of names) {
+    try {
+      const result = execSync(`which ${name} 2>/dev/null || command -v ${name} 2>/dev/null`, { encoding: 'utf8' }).trim();
+      if (result) {
+        // 验证是否能运行（至少能输出版本）
+        try {
+          execSync(`${result} -version 2>/dev/null`, { stdio: 'ignore' });
+          return result;
+        } catch (e) { /* 不能运行就跳过 */ }
+      }
+    } catch (e) { /* 继续尝试 */ }
+  }
+  return null;
 }
 
-const ffprobePath = require('ffprobe-static');
-if (ffprobePath && ffprobePath.path) {
-  ffmpeg.setFfprobePath(ffprobePath.path);
+const systemFfmpeg = findExecutable(['ffmpeg']);
+const systemFfprobe = findExecutable(['ffprobe']);
+
+if (systemFfmpeg) {
+  ffmpeg.setFfmpegPath(systemFfmpeg);
+  console.log(`[server] 使用系统 ffmpeg: ${systemFfmpeg}`);
+} else {
+  const ffmpegPath = require('ffmpeg-static');
+  if (ffmpegPath) {
+    ffmpeg.setFfmpegPath(ffmpegPath);
+    console.log(`[server] 使用 ffmpeg-static: ${ffmpegPath}`);
+  }
+}
+
+if (systemFfprobe) {
+  ffmpeg.setFfprobePath(systemFfprobe);
+  console.log(`[server] 使用系统 ffprobe: ${systemFfprobe}`);
+} else {
+  const ffprobePath = require('ffprobe-static');
+  if (ffprobePath && ffprobePath.path) {
+    ffmpeg.setFfprobePath(ffprobePath.path);
+    console.log(`[server] 使用 ffprobe-static: ${ffprobePath.path}`);
+  }
 }
 
 const app = express();
