@@ -28,16 +28,21 @@ export function TeamAdmin() {
   });
 
   useEffect(() => {
-    refreshMembers();
+    const loadMembers = async () => {
+      try {
+        const teamMembers = await getTeamMembers();
+        setMembers(teamMembers);
+      } catch (error) {
+        console.error('Failed to refresh team members:', error);
+      }
+    };
+    loadMembers();
   }, []);
 
+  // 供事件处理器调用的刷新函数（不要放在 useEffect 依赖中！）
   const refreshMembers = async () => {
-    try {
-      const teamMembers = await getTeamMembers();
-      setMembers(teamMembers);
-    } catch (error) {
-      console.error('Failed to refresh team members:', error);
-    }
+    const teamMembers = await getTeamMembers();
+    setMembers(teamMembers);
   };
 
   const handleCreate = () => {
@@ -53,22 +58,27 @@ export function TeamAdmin() {
   };
 
   const handleEdit = (member: TeamMember) => {
-    setAvatarSourceType(member.avatar.startsWith('http') ? 'url' : 'upload');
+    setAvatarSourceType(member.avatar && member.avatar.startsWith('http') ? 'url' : 'upload');
     setEditingMember(member);
     setFormData({
-      name: member.name,
-      role: member.role,
-      avatar: member.avatar,
-      bio: member.bio,
+      name: member.name || '',
+      role: member.role || '',
+      avatar: member.avatar || '',
+      bio: member.bio || '',
       fullDesc: (member as any).fullDesc || ''
     });
     setViewMode('edit');
   };
 
-  const handleDelete = (id: number) => {
+  const handleDelete = async (id: number) => {
     if (confirm('确定要删除这个团队成员吗？')) {
-      deleteTeamMember(id);
-      refreshMembers();
+      try {
+        await deleteTeamMember(id);
+        await refreshMembers();
+      } catch (error) {
+        console.error('删除失败:', error);
+        alert('删除失败，请重试');
+      }
     }
   };
 
@@ -474,6 +484,9 @@ export function TeamAdmin() {
                     src={member.avatar || '/images/neon-avatar.png'}
                     alt={member.name}
                     className="w-12 h-12 rounded-full object-cover"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src = '/images/neon-avatar.png';
+                    }}
                   />
 
                   <div className="flex-1 min-w-0">

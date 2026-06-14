@@ -547,6 +547,98 @@ app.post('/api/upload/image', upload.single('file'), async (req, res) => {
   }
 });
 
+// 从远程URL下载图片 → 压缩 → 上传OSS
+// 用途：当浏览器因CORS限制无法直接fetch远程图片URL时，
+// 把URL发送到此接口，由服务器代劳上传到OSS
+app.post('/api/upload/from-url', express.json({ limit: '1mb' }), async (req, res) => {
+  try {
+    const { url } = req.body;
+    if (!url) {
+      return res.status(400).json({ error: '缺少参数 url' });
+    }
+
+    console.log(`[upload-from-url] 下载: ${url.substring(0, 100)}`);
+
+    // 1. 从远程URL下载（60秒超时，容忍服务器网络慢）
+    let buffer;
+    let contentType = '';
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 60000);
+      const response = await fetch(url, {
+        signal: controller.signal,
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+      });
+      clearTimeout(timeout);
+
+      if (!response.ok) {
+        console.log(`[upload-from-url] 下载失败: HTTP ${response.status}`);
+        return res.status(400).json({ error: `远程下载失败: HTTP ${response.status}` });
+      }
+
+      buffer = Buffer.from(await response.arrayBuffer());
+      contentType = response.headers.get('content-type') || '';
+    } catch (err) {
+      console.log(`[upload-from-url] 下载异常: ${err.message}`);
+      return res.status(400).json({ error: `远程下载异常: ${err.message}` });
+    }
+
+    if (buffer.length < 100) {
+      return res.status(400).json({ error: '下载的内容不是有效图片' });
+    }
+    const originalSizeKB = (buffer.length / 1024).toFixed(2);
+    console.log(`[upload-from-url] 下载完成: ${buffer.length} bytes (${originalSizeKB}KB), 类型: ${contentType}`);
+
+    // 2. 压缩图片（如果 > 300KB）
+    let compressed = false;
+    let compressedSizeKB = originalSizeKB;
+    if (buffer.length > 300 * 1024) {
+      try {
+        buffer = await compressImage(buffer, 300);
+        compressedSizeKB = (buffer.length / 1024).toFixed(2);
+        compressed = true;
+        console.log(`[upload-from-url] 压缩: ${originalSizeKB}KB -> ${compressedSizeKB}KB`);
+      } catch (err) {
+        console.log(`[upload-from-url] 压缩失败，使用原图: ${err.message}`);
+      }
+    }
+
+    // 3. 上传到OSS（优先）或本地存储
+    let fileUrl = '';
+    const ext = contentType.includes('png') ? 'png' : contentType.includes('webp') ? 'webp' : 'jpg';
+    const fileName = `remote-${Date.now()}.${ext}`;
+
+    if (isOSSConfigured && ossClient) {
+      try {
+        const ossFileName = `images/${fileName}`;
+        const result = await ossClient.put(ossFileName, buffer);
+        fileUrl = result.url;
+        console.log(`[upload-from-url] ✅ OSS 上传成功: ${fileUrl.substring(0, 60)}`);
+      } catch (ossError) {
+        console.log(`[upload-from-url] ❌ OSS 上传失败: ${ossError.message}`);
+        return res.status(500).json({ error: 'OSS 上传失败: ' + ossError.message });
+      }
+    } else {
+      console.log(`[upload-from-url] ❌ OSS 未配置，拒绝本地存储`);
+      return res.status(500).json({
+        error: 'OSS 未配置，无法保存远程图片到本地',
+        ossError: true,
+        message: '请配置 OSS 环境变量（REACT_APP_OSS_ACCESS_KEY_ID 等）'
+      });
+    }
+
+    res.json({
+      url: fileUrl,
+      compressed: compressed,
+      originalSizeKB: parseFloat(originalSizeKB),
+      compressedSizeKB: parseFloat(compressedSizeKB)
+    });
+  } catch (error) {
+    console.error('[upload-from-url] 异常:', error.message);
+    res.status(500).json({ error: '上传失败: ' + error.message });
+  }
+});
+
 // OSS 预签名上传接口（客户端直传 OSS 使用）
 app.post('/api/oss/presign', async (req, res) => {
   try {
@@ -1365,10 +1457,37 @@ async function callGeekAIModel(modelName, prompt, quality, size, apiKey, timeout
       return { success: false, error: `HTTP ${response.status}: ${errText.substring(0, 100)}` };
     }
     const data = await response.json();
-    if (data && data.data && data.data[0] && data.data[0].url) {
+    
+    // ======== 支持多种返回格式 ========
+    // 格式1: 旧格式 data.data[0].url
+    if (data && data.data && Array.isArray(data.data) && data.data[0] && data.data[0].url) {
+      console.log(`[GeekAI] 使用格式1: data.data[0].url`);
       return { success: true, url: data.data[0].url };
     }
-    return { success: false, error: '返回数据格式异常' };
+    
+    // 格式2: 新格式 data.url（单图片直接返回）
+    if (data && data.url) {
+      console.log(`[GeekAI] 使用格式2: data.url`);
+      return { success: true, url: data.url };
+    }
+    
+    // 格式3: 可能的新格式 data.output.url
+    if (data && data.output && data.output.url) {
+      console.log(`[GeekAI] 使用格式3: data.output.url`);
+      return { success: true, url: data.output.url };
+    }
+    
+    // 格式4: 检查 data.images[0].url
+    if (data && data.images && Array.isArray(data.images) && data.images[0] && data.images[0].url) {
+      console.log(`[GeekAI] 使用格式4: data.images[0].url`);
+      return { success: true, url: data.images[0].url };
+    }
+    
+    // 调试日志：打印实际返回格式
+    console.log(`[GeekAI] ❌ 返回数据格式异常，无法提取 URL`);
+    console.log(`[GeekAI] 原始响应(前500字符):`, JSON.stringify(data).substring(0, 500));
+    
+    return { success: false, error: '返回数据格式异常，无法提取图片URL' };
   } catch (err) {
     clearTimeout(timeout);
     return { success: false, error: err.message };
@@ -1400,25 +1519,134 @@ function downloadAndSaveRemoteImage(imageUrl, seed, uploadDir, fs, path) {
   });
 }
 
-// AI 生成封面图 - GeekAI 两级模型 (gpt-image-2 -> z-image-turbo) + 多级降级 + 进度记录
+// ============ 提示词辅助函数 ============
+// 中→英提示词映射表，供 Pollinations / LoremFlickr 等英文模型使用
+const zh2EnMap = {
+  // 核心业务词
+  '课程': 'course, education',
+  '教育': 'education, learning',
+  '慕课': 'mooc, online course',
+  '在线': 'online, digital',
+  '活动': 'event, activity, celebration',
+  '毕业': 'graduation, commencement',
+  '典礼': 'ceremony, celebration',
+  '人物': 'portrait, people, character',
+  '专访': 'interview, profile',
+  '动画': 'animation, motion graphic',
+  '演示': 'presentation, demo',
+  '宣传': 'promotional, advertising',
+  '商业': 'business, commercial',
+  '企业': 'corporate, enterprise, company',
+  '党课': 'party class, red culture',
+  '党建': 'party building, red culture',
+  '专题': 'featured, special topic',
+  '纪录片': 'documentary film',
+  '视频': 'video, cinematic',
+  '形象': 'brand image, corporate identity',
+  '招生': 'student recruitment, campus',
+  '人才引进': 'talent recruitment, corporate',
+  '数字人': 'digital human, ai avatar',
+  '短片': 'short film, cinematic',
+  '思政': 'ideological education, serious',
+  '舞台': 'stage, spotlight, performance',
+  '校园': 'campus, university, school',
+  '党建宣传': 'party propaganda, red theme',
+  '公司': 'corporate office',
+  '产品': 'product showcase',
+  '品牌': 'brand image',
+  '摄影': 'photography, cinematic',
+  '电影': 'cinematic, movie scene',
+
+  // 风格/氛围词
+  '专业': 'professional',
+  '科技': 'technology, tech',
+  '现代': 'modern, contemporary',
+  '明亮': 'bright, well lit',
+  '温暖': 'warm, cozy',
+  '庄重': 'solemn, formal',
+  '大气': 'majestic, grand',
+  '清新': 'fresh, vibrant',
+  '精致': 'exquisite, refined',
+  '炫酷': 'cool, futuristic',
+  '活力': 'energetic, dynamic',
+  '稳重': 'stable, professional',
+  '蓝色': 'blue theme',
+  '绿色': 'green theme',
+  '红色': 'red theme',
+  '橙红': 'orange red theme',
+  '紫红': 'purple magenta theme',
+  '高清': 'high definition, 4k',
+  '电影级': 'cinematic, movie quality',
+};
+
+// 将中文提示词翻译成组合英文提示词
+function translateZhPromptToEnglish(zhText) {
+  if (!zhText) return '';
+  const keywords = [];
+  for (const [zh, en] of Object.entries(zh2EnMap)) {
+    if (zhText.includes(zh)) {
+      keywords.push(en);
+    }
+  }
+  // 如果没有匹配到任何关键词，使用标题的英文拼音作为兜底
+  if (keywords.length === 0) {
+    const basicWords = zhText.split(/[,，。\s]+/).filter(w => w && w.length > 0).slice(0, 3).join(' ');
+    keywords.push(basicWords);
+  }
+  return keywords.join(', ');
+}
+
+// 根据分类名称获取更精确的英文风格提示词
+function getEnglishStyleByCategory(categoryName) {
+  const nameLower = String(categoryName || '').toLowerCase();
+  const styles = [];
+
+  if (nameLower.includes('课程') || nameLower.includes('教育') || nameLower.includes('慕课') || nameLower.includes('mooc') || nameLower.includes('思政')) {
+    styles.push('education classroom', 'modern university campus', 'blue green clean', 'professional lighting', 'cinematic composition');
+  } else if (nameLower.includes('活动') || nameLower.includes('毕业') || nameLower.includes('典礼')) {
+    styles.push('event ceremony', 'warm spotlight', 'stage atmosphere', 'orange red theme', 'energetic vibrant', 'cinematic');
+  } else if (nameLower.includes('人物') || nameLower.includes('专访')) {
+    styles.push('portrait photography', 'professional lighting', 'dark moody', 'documentary style', 'warm tones', 'cinematic');
+  } else if (nameLower.includes('动画') || nameLower.includes('app') || nameLower.includes('演示')) {
+    styles.push('tech demo style', 'interface design', 'motion graphic aesthetic', 'vibrant colors', 'blue cyan theme', 'modern futuristic');
+  } else if (nameLower.includes('商业') || nameLower.includes('宣传') || nameLower.includes('企业') || nameLower.includes('公司')) {
+    styles.push('corporate promotional', 'professional corporate', 'business blue tone', 'modern office building', 'majestic grand', 'corporate identity');
+  } else if (nameLower.includes('党课') || nameLower.includes('党建')) {
+    styles.push('red cultural theme', 'solemn formal', 'chinese red element', 'great hall style', 'patriotic atmosphere', 'cinematic');
+  } else if (nameLower.includes('专题') || nameLower.includes('纪录片') || nameLower.includes('视频')) {
+    styles.push('documentary film', 'cinematic scene', 'wide angle lens', 'natural light', 'narrative composition', 'film color grading');
+  } else if (nameLower.includes('数字人') || nameLower.includes('ai')) {
+    styles.push('digital human avatar', 'futuristic cyberpunk', 'holographic interface', 'neon blue purple', 'sci-fi cinematic');
+  } else if (nameLower.includes('招生') || nameLower.includes('校园')) {
+    styles.push('university campus', 'youthful energy', 'blue sky modern building', 'professional academic', 'cinematic');
+  } else {
+    styles.push('professional photography', 'modern design', 'bright fresh', 'soft light', 'balanced composition', 'cinematic quality', 'beautiful scene');
+  }
+
+  return styles.join(', ');
+}
+
+// AI 生成封面图
 app.post('/api/ai/generate-cover', async (req, res) => {
-  const progress = []; // 记录每一步的状态，供前端展示
-  let usedModel = null; // 记录最终成功使用的服务
+  const progress = [];
+  let usedModel = null;
 
   try {
-    const { categoryName, description } = req.body;
+    const rawCategoryName = req.body.categoryName;
+    const description = req.body.description || '';
 
+    const categoryName = String(rawCategoryName || '').trim();
     if (!categoryName) {
-      return res.status(400).json({ success: false, message: '请输入分类名称', progress: progress });
+      return res.status(400).json({
+        success: false,
+        message: '请先输入分类名称或标题',
+        progress: progress
+      });
     }
 
     const seed = Math.floor(Math.random() * 10000000);
-    console.log(`[AI Cover] 生成: categoryName=${categoryName}, seed=${seed}`);
+    console.log(`[AI Cover] 生成: categoryName=${categoryName}, description=${description.substring(0, 50)}, seed=${seed}`);
 
-    // ============ 根据 imageType 确定宽高比例 ============
-    // cover(16:9) - 分类卡片封面
-    // hero(16:9) - 首页 Hero 轮播图
-    // share(1:1) - 分享缩略图
     const imageType = req.body.imageType || 'cover';
     const typeConfig = {
       cover: { width: 1024, height: 576 },
@@ -1428,16 +1656,32 @@ app.post('/api/ai/generate-cover', async (req, res) => {
     const { width, height } = typeConfig[imageType] || typeConfig.cover;
     console.log(`[AI Cover] imageType=${imageType}, 分辨率: ${width}x${height}`);
 
-    // 蓝紫科技风 prompt
-    const zhPrompt = `${categoryName},${description || ''},蓝紫科技风,赛博朋克风格,霓虹光效,未来科技感,深色背景,高清质感`;
+    // 风格描述
+    const nameLower = categoryName.toLowerCase();
+    let stylePrompt;
+    if (nameLower.includes('课程') || nameLower.includes('教育')) {
+      stylePrompt = '教育学习风格,教室黑板,科技感学习环境,明亮清新,蓝色与绿色主题,专业教学氛围,高清质感,电影级画面';
+    } else if (nameLower.includes('活动') || nameLower.includes('毕业')) {
+      stylePrompt = '活动庆典风格,温暖聚光灯,舞台氛围,活力四射,橙红色主题,现场感强烈,高清质感,电影级画面';
+    } else if (nameLower.includes('人物') || nameLower.includes('专访')) {
+      stylePrompt = '人物摄影风格,专业布光,深色调,纪实摄影风格,温暖柔和,电影级质感,高清,精美构图';
+    } else if (nameLower.includes('商业') || nameLower.includes('企业')) {
+      stylePrompt = '企业宣传片风格,专业大气,商务蓝色调,现代办公楼,稳重专业,高清质感,企业形象,电影级画面';
+    } else if (nameLower.includes('党课') || nameLower.includes('党建')) {
+      stylePrompt = '党建宣传风格,红色主题,庄重严肃,五星红旗元素,红色建筑背景,正式大气,高清质感,电影级画面';
+    } else {
+      stylePrompt = '专业摄影风格,现代设计,清新明亮,柔和光线,构图平衡,高清质感,精美画面,电影级画面';
+    }
 
-    // ============ 步骤 1 & 2: GeekAI 两级模型链 ============
+    const zhPrompt = `${categoryName}${description ? '，' + description : ''}，${stylePrompt}`;
+    console.log(`[AI Cover] 中文提示词: ${zhPrompt}`);
+
+    // 步骤 1: 尝试 GeekAI 付费服务（z-image-turbo 优先，速度快且稳定）
+    // ✅ 不再经过服务器下载保存，直接返回远程 URL 给浏览器
     const geekAIKey = process.env.GEEKAI_API_KEY;
-
-    // GeekAI 模型配置表（按尝试顺序排列）
     const geekModels = [
-      { name: 'gpt-image-2', quality: 'low', label: 'GPT-Image-2', timeout: 40000 },
-      { name: 'z-image-turbo', quality: 'standard', label: '通义-文生图-Z-Image', timeout: 40000 },
+      { name: 'z-image-turbo', quality: 'standard', label: '通义-文生图', timeout: 40000 },
+      { name: 'gpt-image-2', quality: 'low', label: 'GPT-Image-2', timeout: 30000 },
     ];
 
     if (geekAIKey) {
@@ -1449,110 +1693,47 @@ app.post('/api/ai/generate-cover', async (req, res) => {
         const result = await callGeekAIModel(model.name, zhPrompt, model.quality, `${width}x${height}`, geekAIKey, model.timeout);
 
         if (result.success) {
-          console.log(`[AI Cover] ${model.label} 返回图片 URL: ${result.url.substring(0, 60)}...`);
-          progress.push({ stage: model.label, status: 'downloading', message: '下载图片中...' });
-
-          const dlResult = await downloadAndSaveRemoteImage(result.url, seed, uploadDir, fs, path);
-          if (dlResult.success) {
-            console.log(`[AI Cover] 成功 (${model.label})! 大小: ${dlResult.sizeBytes} bytes`);
-            progress.push({ stage: model.label, status: 'success', message: `生成成功！` });
-            usedModel = model.label;
-            return res.json({
-              success: true,
-              data: { url: `/uploads/images/${dlResult.fileName}` },
-              progress: progress,
-              usedModel: usedModel
-            });
-          } else {
-              console.log(`[AI Cover] ${model.label} 图片下载失败: ${dlResult.error}`);
-              progress.push({ stage: model.label, status: 'failed', message: `图片下载失败: ${dlResult.error}` });
-          }
+          console.log(`[AI Cover] ✅ ${model.label} 成功: ${result.url.substring(0, 80)}`);
+          progress.push({ stage: model.label, status: 'success', message: '生成成功！（浏览器直接加载）' });
+          usedModel = model.label;
+          // 直接返回远程 URL，让浏览器访问，不经过服务器下载保存
+          return res.json({
+            success: true,
+            data: { url: result.url },
+            progress: progress,
+            usedModel: usedModel
+          });
         } else {
-          console.log(`[AI Cover] ${model.label} 失败: ${result.error}`);
-          progress.push({ stage: model.label, status: 'failed', message: `${model.label} 不可用: ${result.error.substring(0, 50)}` });
+          console.log(`[AI Cover] ❌ ${model.label} 失败: ${result.error}`);
+          progress.push({ stage: model.label, status: 'failed', message: `${model.label} 不可用: ${(result.error || '').substring(0, 50)}` });
         }
       }
     } else {
-      console.log(`[AI Cover] 未配置 GEEKAI_API_KEY，跳过 GeekAI 服务`);
+      console.log(`[AI Cover] ⚠️ 未配置 GEEKAI_API_KEY，跳过 GeekAI 服务`);
       progress.push({ stage: 'geekai', status: 'skipped', message: '未配置 API Key，跳过付费 AI 生图' });
     }
 
-    // ============ 降级链：免费服务 ============
-    const coverServices = [
-      { label: 'Pollinations.ai (完整描述)', getUrl: () => `https://image.pollinations.ai/prompt/${encodeURIComponent(zhPrompt)}?width=${width}&height=${height}&nologo=true&enhance=true&seed=${seed}` },
-      { label: 'Pollinations.ai (简短描述)', getUrl: () => `https://image.pollinations.ai/prompt/${encodeURIComponent(categoryName)}?width=${width}&height=${height}&nologo=true&seed=${seed + 1}` },
-      { label: 'LoremFlickr', getUrl: () => `https://loremflickr.com/${width}/${height}/${encodeURIComponent(categoryName)}?lock=${seed + 2}` },
-    ];
-
-    for (let i = 0; i < coverServices.length; i++) {
-      const svc = coverServices[i];
-      const url = svc.getUrl();
-      console.log(`[AI Cover] 尝试 ${svc.label}: ${url.substring(0, 80)}...`);
-      progress.push({ stage: svc.label, status: 'requesting', message: `正在从 ${svc.label} 获取图片...` });
-
-      try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 15000);
-        const response = await fetch(url, { signal: controller.signal, headers: { 'User-Agent': 'Mozilla/5.0' } });
-        clearTimeout(timeout);
-
-        if (response.ok) {
-          const buffer = Buffer.from(await response.arrayBuffer());
-          const contentType = response.headers.get('content-type') || '';
-          if (buffer.length > 5000 && (contentType.includes('image') || contentType === 'application/octet-stream')) {
-            const ext = contentType.includes('jpeg') ? 'jpg' : contentType.includes('png') ? 'png' : contentType.includes('webp') ? 'webp' : 'jpg';
-            const fileName = `ai-cover-${Date.now()}-${seed}.${ext}`;
-            const filePath = path.join(uploadDir, 'images', fileName);
-            fs.writeFileSync(filePath, buffer);
-
-            console.log(`[AI Cover] 成功 (${svc.label})! 大小: ${buffer.length} bytes`);
-            progress.push({ stage: svc.label, status: 'success', message: '生成成功！' });
-            usedModel = svc.label;
-            return res.json({
-              success: true,
-              data: { url: `/uploads/images/${fileName}` },
-              progress: progress,
-              usedModel: usedModel
-            });
-          } else {
-            console.log(`[AI Cover] ${svc.label} 图片不符合要求: ${contentType}, ${buffer.length} bytes`);
-            progress.push({ stage: svc.label, status: 'failed', message: '图片不符合要求' });
-          }
-        } else {
-          console.log(`[AI Cover] ${svc.label} 返回状态: ${response.status}`);
-          progress.push({ stage: svc.label, status: 'failed', message: `服务返回 ${response.status}` });
-        }
-      } catch (err) {
-        console.log(`[AI Cover] ${svc.label} 出错: ${err.message}`);
-        progress.push({ stage: svc.label, status: 'failed', message: `网络请求失败` });
-      }
-    }
-
-    // 最终降级：本地生成渐变封面
-    console.log(`[AI Cover] 所有远程服务失败，使用本地方案: 渐变SVG`);
-    progress.push({ stage: 'local-fallback', status: 'info', message: '远程服务不可用，使用本地渐变图' });
-    const gradientUrl = generateGradientCover(categoryName.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0));
-    usedModel = 'local-gradient';
-
-    return res.json({
-      success: true,
-      data: { url: gradientUrl },
+    // 步骤 2: GeekAI 全部失败，返回 success:false（由前端继续尝试 Pollinations/Picsum 降级）
+    console.log(`[AI Cover] ❌ 所有 GeekAI 模型失败，由前端继续降级处理`);
+    return res.status(200).json({
+      success: false,
+      data: null,
       progress: progress,
-      usedModel: usedModel
+      usedModel: null,
+      message: '所有后端AI服务失败，请前端继续降级处理'
     });
 
   } catch (error) {
-    console.error('[AI Cover] 失败:', error.message);
+    console.error('[AI Cover] 异常:', error.message);
     progress.push({ stage: 'error', status: 'error', message: `异常: ${error.message}` });
 
-    const seed = (req.body && req.body.categoryName || 'default').split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-    const fallbackUrl = generateGradientCover(seed);
-
-    res.json({
-      success: true,
-      data: { url: fallbackUrl },
+    // 返回失败信号，由前端继续降级处理
+    return res.status(200).json({
+      success: false,
+      data: null,
       progress: progress,
-      usedModel: 'local-gradient'
+      usedModel: null,
+      message: `后端异常: ${error.message}`
     });
   }
 });

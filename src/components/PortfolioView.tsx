@@ -168,8 +168,11 @@ export function PortfolioView() {
                   <img
                     alt={item.title}
                     className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-105 opacity-60 group-hover:opacity-80"
-                    src={item.img}
+                    src={item.img || '/images/hero-home.png'}
                     loading="lazy"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src = '/images/hero-home.png';
+                    }}
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-[#0c0e14] via-[#0c0e14]/40 to-transparent" />
                   <div className={`absolute inset-0 opacity-0 group-hover:opacity-20 transition-opacity duration-700 ${item.bgGlow}`} />
@@ -188,12 +191,16 @@ export function PortfolioView() {
 
                   <div className="space-y-4">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className={`px-2.5 py-1 rounded-lg bg-black/40 backdrop-blur-md border border-white/10 text-[9px] font-label uppercase tracking-[0.25em] ${item.color}`}>
-                        {item.category}
-                      </span>
-                      <span className="px-2.5 py-1 rounded-lg bg-white/5 backdrop-blur-md border border-white/10 text-white/40 text-[9px] font-label uppercase tracking-[0.25em]">
-                        {item.tag}
-                      </span>
+                      {item.category && !/^\d+$/.test(item.category) && (
+                        <span className={`px-2.5 py-1 rounded-lg bg-black/40 backdrop-blur-md border border-white/10 text-[9px] font-label uppercase tracking-[0.25em] ${item.color}`}>
+                          {item.category}
+                        </span>
+                      )}
+                      {item.tag && !/^\d+$/.test(item.tag) && (
+                        <span className="px-2.5 py-1 rounded-lg bg-white/5 backdrop-blur-md border border-white/10 text-white/40 text-[9px] font-label uppercase tracking-[0.25em]">
+                          {item.tag}
+                        </span>
+                      )}
                     </div>
 
                     <div>

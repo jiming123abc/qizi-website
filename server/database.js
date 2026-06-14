@@ -569,53 +569,70 @@ const categoriesDetails = {
     return category;
   },
   update: async (id, category) => {
-    // 先获取旧的分类名称
-    const oldCategory = await dbAsync.get('SELECT name FROM categories_details WHERE id=?', [id]);
-    const oldName = oldCategory?.name;
-    
-    // 更新分类
+    const oldCategory = await dbAsync.get('SELECT * FROM categories_details WHERE id=?', [id]);
+    if (!oldCategory) throw new Error('分类不存在');
+    const oldName = oldCategory.name;
+
+    const merged = {
+      name: category.name !== undefined ? category.name : oldCategory.name,
+      description: category.description !== undefined ? category.description : oldCategory.description,
+      coverImage: category.coverImage !== undefined ? category.coverImage : oldCategory.coverImage,
+      icon: category.icon !== undefined ? category.icon : oldCategory.icon,
+      sortOrder: category.sortOrder !== undefined ? category.sortOrder : oldCategory.sortOrder,
+      tag: category.tag !== undefined ? category.tag : oldCategory.tag,
+      color: category.color !== undefined ? category.color : oldCategory.color,
+      bgGlow: category.bgGlow !== undefined ? category.bgGlow : oldCategory.bgGlow,
+    };
+
     await dbAsync.run(
       'UPDATE categories_details SET name=?, description=?, coverImage=?, icon=?, sortOrder=?, tag=?, color=?, bgGlow=?, updatedAt=CURRENT_TIMESTAMP WHERE id=?',
       [
-        category.name, category.description, category.coverImage, category.icon,
-        category.sortOrder, category.tag, category.color, category.bgGlow, id
+        merged.name, merged.description, merged.coverImage, merged.icon,
+        merged.sortOrder, merged.tag, merged.color, merged.bgGlow, id
       ]
     );
-    
-    // 如果分类名称改变了，同步更新所有相关作品的分类
-    if (oldName && oldName !== category.name) {
+
+    if (oldName && merged.name && oldName !== merged.name) {
       await dbAsync.run(
         'UPDATE portfolio_items SET category=?, updatedAt=CURRENT_TIMESTAMP WHERE category=?',
-        [category.name, oldName]
+        [merged.name, oldName]
       );
     }
-    
-    return { id, ...category };
+
+    return { id, ...merged };
   },
   put: async (category) => {
     const id = category.id;
-    const existing = await dbAsync.get('SELECT id FROM categories_details WHERE id=?', [id]);
+    const existing = await dbAsync.get('SELECT * FROM categories_details WHERE id=?', [id]);
     if (existing) {
-      // 先获取旧的分类名称
-      const oldCategory = await dbAsync.get('SELECT name FROM categories_details WHERE id=?', [id]);
-      const oldName = oldCategory?.name;
-      
-      // 更新分类
+      const oldName = existing.name;
+
+      const merged = {
+        name: category.name !== undefined ? category.name : existing.name,
+        description: category.description !== undefined ? category.description : existing.description,
+        coverImage: category.coverImage !== undefined ? category.coverImage : existing.coverImage,
+        icon: category.icon !== undefined ? category.icon : existing.icon,
+        sortOrder: category.sortOrder !== undefined ? category.sortOrder : existing.sortOrder,
+        tag: category.tag !== undefined ? category.tag : existing.tag,
+        color: category.color !== undefined ? category.color : existing.color,
+        bgGlow: category.bgGlow !== undefined ? category.bgGlow : existing.bgGlow,
+      };
+
       await dbAsync.run(
         'UPDATE categories_details SET name=?, description=?, coverImage=?, icon=?, sortOrder=?, tag=?, color=?, bgGlow=?, updatedAt=CURRENT_TIMESTAMP WHERE id=?',
         [
-          category.name, category.description, category.coverImage, category.icon,
-          category.sortOrder, category.tag, category.color, category.bgGlow, id
+          merged.name, merged.description, merged.coverImage, merged.icon,
+          merged.sortOrder, merged.tag, merged.color, merged.bgGlow, id
         ]
       );
-      
-      // 如果分类名称改变了，同步更新所有相关作品的分类
-      if (oldName && oldName !== category.name) {
+
+      if (oldName && merged.name && oldName !== merged.name) {
         await dbAsync.run(
           'UPDATE portfolio_items SET category=?, updatedAt=CURRENT_TIMESTAMP WHERE category=?',
-          [category.name, oldName]
+          [merged.name, oldName]
         );
       }
+      return { id, ...merged };
     } else {
       await dbAsync.run(
         'INSERT INTO categories_details (id, name, description, coverImage, icon, sortOrder, tag, color, bgGlow) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
@@ -624,8 +641,8 @@ const categoriesDetails = {
           category.icon, category.sortOrder, category.tag, category.color, category.bgGlow
         ]
       );
+      return category;
     }
-    return category;
   },
   updateSort: async (categories) => {
     for (const cat of categories) {

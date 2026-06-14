@@ -30,6 +30,7 @@ import {
 import { generateQRCode } from '../../lib/qrCode';
 import { uploadImage, checkVideoBitrate, uploadVideoDirectToOSS, uploadVideoToServerWithCompression, uploadVideoWithBrowserCompression, UploadError } from '../../lib/ossUtils';
 import { validateVodUrl } from '../../lib/vodUtils';
+import { ensureImageOnOSS } from '../../lib/aiGenerator';
 
 type ViewMode = 'list' | 'create' | 'edit';
 
@@ -104,18 +105,22 @@ export function PortfolioAdmin() {
   const [additionalImageUrlInput, setAdditionalImageUrlInput] = useState('');
 
   useEffect(() => {
-    refreshItems();
-    loadCategories();
+    const init = async () => {
+      try {
+        const allItems = await getPortfolioItems();
+        setItems(allItems.sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0)));
+      } catch (error) {
+        console.error('Failed to refresh items:', error);
+      }
+      try {
+        const cats = await getCategoriesWithDetails();
+        setCategories(cats.map(c => c.name));
+      } catch (error) {
+        console.error('Failed to load categories:', error);
+      }
+    };
+    init();
   }, []);
-
-  const loadCategories = async () => {
-    try {
-      const cats = await getCategoriesWithDetails();
-      setCategories(cats.map(c => c.name));
-    } catch (error) {
-      console.error('Failed to load categories:', error);
-    }
-  };
 
   // 监听分类加载完成，设置默认分类
   useEffect(() => {
@@ -241,21 +246,21 @@ export function PortfolioAdmin() {
   };
 
   const handleEdit = (item: PortfolioItem) => {
-    setImgSourceType(item.img.startsWith('http') ? 'url' : 'upload');
+    setImgSourceType(item.img && item.img.startsWith('http') ? 'url' : 'upload');
     setVideoSourceType(item.videoUrl && item.videoUrl.startsWith('http') ? 'url' : 'upload');
     setEditingItem(item);
     setFormData({
-      title: item.title,
-      category: item.category,
-      tag: item.tag,
-      shortDesc: item.shortDesc,
-      fullDesc: item.fullDesc,
-      img: item.img,
+      title: item.title || '',
+      category: item.category || '',
+      tag: item.tag || '',
+      shortDesc: item.shortDesc || '',
+      fullDesc: item.fullDesc || '',
+      img: item.img || '',
       images: item.images || [],
       videoUrl: item.videoUrl || '',
-      type: item.type,
-      color: item.color,
-      bgGlow: item.bgGlow,
+      type: item.type || 'image',
+      color: item.color || 'text-primary',
+      bgGlow: item.bgGlow || 'bg-primary/20',
       hidden: !!item.hidden
     });
     setViewMode('edit');
@@ -263,8 +268,13 @@ export function PortfolioAdmin() {
 
   const handleDelete = async (id: number) => {
     if (confirm('确定要删除这个案例吗？')) {
-      deletePortfolioItem(id);
-      refreshItems();
+      try {
+        await deletePortfolioItem(id);
+        await refreshItems();
+      } catch (error) {
+        console.error('删除失败:', error);
+        alert('删除失败，请重试');
+      }
     }
   };
 
@@ -569,11 +579,46 @@ export function PortfolioAdmin() {
       return;
     }
 
+    setIsLoading(true);
     try {
+      // 将 AI 生成的外链封面图上传到 OSS（不保存本地）
+      let finalImg = formData.img;
+      if (finalImg && (finalImg.startsWith('http://') || finalImg.startsWith('https://'))
+          && !finalImg.includes('aliyuncs.com') && !finalImg.includes('myqcloud.com')) {
+        try {
+          console.log('[PortfolioAdmin] AI封面图转存 OSS:', finalImg.substring(0, 60));
+          finalImg = await ensureImageOnOSS(finalImg);
+          setFormData(prev => ({ ...prev, img: finalImg }));
+          console.log('[PortfolioAdmin] ✅ 转存成功:', finalImg.substring(0, 60));
+        } catch (err) {
+          console.warn('[PortfolioAdmin] 封面图转存OSS失败，保留原URL:', err);
+          alert('封面图上传至OSS失败，已保留原图片链接。请检查OSS配置后重试。');
+        }
+      }
+
+      // 将 AI 生成的外链附加图上传到 OSS
+      let finalImages = formData.images;
+      if (finalImages && finalImages.length > 0) {
+        const newImages = [...finalImages];
+        for (let i = 0; i < newImages.length; i++) {
+          const img = newImages[i];
+          if (img && (img.startsWith('http://') || img.startsWith('https://'))
+              && !img.includes('aliyuncs.com') && !img.includes('myqcloud.com')) {
+            try {
+              newImages[i] = await ensureImageOnOSS(img);
+            } catch (err) {
+              console.warn(`[PortfolioAdmin] 附加图 ${i + 1} 转存OSS失败，保留原URL:`, err);
+            }
+          }
+        }
+        finalImages = newImages;
+        setFormData(prev => ({ ...prev, images: finalImages }));
+      }
+
       if (viewMode === 'create') {
-        await addPortfolioItem(formData);
+        await addPortfolioItem({ ...formData, img: finalImg, images: finalImages });
       } else if (viewMode === 'edit' && editingItem) {
-        await updatePortfolioItem({ ...formData, id: editingItem.id, sortOrder: editingItem.sortOrder });
+        await updatePortfolioItem({ ...formData, id: editingItem.id, sortOrder: editingItem.sortOrder, img: finalImg, images: finalImages });
       }
 
       setViewMode('list');
@@ -581,6 +626,8 @@ export function PortfolioAdmin() {
     } catch (error) {
       console.error('保存失败:', error);
       alert('保存失败，请重试');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -1221,11 +1268,13 @@ export function PortfolioAdmin() {
                   </p>
                   <div className="flex items-center gap-4">
                     <div className="bg-white p-2 rounded-lg">
-                      <img
-                        src={qrCodeUrl}
-                        alt="QR Code"
-                        className="w-32 h-32"
-                      />
+                      {qrCodeUrl && (
+                        <img
+                          src={qrCodeUrl}
+                          alt="QR Code"
+                          className="w-32 h-32"
+                        />
+                      )}
                     </div>
                     <div className="flex-1">
                       <p className="text-xs text-on-surface-variant break-all">
@@ -1355,27 +1404,34 @@ export function PortfolioAdmin() {
                 </span>
 
                 <img
-                  src={item.img}
+                  src={item.img || '/images/hero-home.png'}
                   alt={item.title}
                   className="w-12 h-12 rounded-lg object-cover"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).src = '/images/hero-home.png';
+                  }}
                 />
 
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <div className="font-headline font-medium text-on-surface truncate">{item.title}</div>
-                    {item.hidden && (
+                    {!!item.hidden && item.hidden !== 0 && item.hidden !== '0' && (
                       <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-yellow-500/20 text-yellow-400 text-xs">
                         <EyeOff className="w-3 h-3" />
                         已隐藏
                       </span>
                     )}
                   </div>
-                  <div className="text-xs text-on-surface-variant">{item.tag}</div>
+                  {item.tag && !/^\d+$/.test(item.tag) ? (
+                    <div className="text-xs text-on-surface-variant">{item.tag}</div>
+                  ) : null}
                 </div>
 
-                <span className="px-2 py-1 rounded-lg bg-black/30 text-xs text-on-surface-variant">
-                  {item.category}
-                </span>
+                {item.category && !/^\d+$/.test(item.category) ? (
+                  <span className="px-2 py-1 rounded-lg bg-black/30 text-xs text-on-surface-variant">
+                    {item.category}
+                  </span>
+                ) : null}
 
                 <span className={`px-2 py-1 rounded-lg text-xs ${
                   item.type === 'video' 

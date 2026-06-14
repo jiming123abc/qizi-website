@@ -228,7 +228,7 @@ export function FeaturedAdmin() {
                       {item.title}
                     </div>
                     <div className="text-xs text-on-surface-variant">
-                      {item.category}
+                      {item.category && !/^\d+$/.test(item.category) ? item.category : ''}
                     </div>
                   </div>
 
@@ -288,7 +288,7 @@ export function FeaturedAdmin() {
                           {item.title}
                         </div>
                         <div className="text-xs text-on-surface-variant">
-                          {item.category}
+                          {item.category && !/^\d+$/.test(item.category) ? item.category : ''}
                         </div>
                       </div>
                       <div className="w-6 h-6 rounded-full border-2 border-primary/30 flex items-center justify-center">

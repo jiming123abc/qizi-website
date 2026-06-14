@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Save, Image, Link, FileImage, Loader2, Plus, X, Check, AlertCircle, Sparkles } from 'lucide-react';
 import { getHomeContent, saveHomeContent, HomeContent, getPortfolioItems, PortfolioItem } from '../../data/store';
 import { uploadImage, UploadError } from '../../lib/ossUtils';
-import { generateHeroSlideImage, generateShareImage } from '../../lib/aiGenerator';
+import { generateHeroSlideImage, ensureImageOnOSS } from '../../lib/aiGenerator';
 
 export function HomeContentAdmin() {
   const [content, setContent] = useState<HomeContent>({
@@ -31,8 +31,6 @@ export function HomeContentAdmin() {
   const [portfolioItems, setPortfolioItems] = useState<PortfolioItem[]>([]);
   const [isGeneratingSlide, setIsGeneratingSlide] = useState<number | null>(null);
   const [slideGenMessage, setSlideGenMessage] = useState('');
-  const [isGeneratingHeroImage, setIsGeneratingHeroImage] = useState(false);
-  const [heroImageGenMessage, setHeroImageGenMessage] = useState('');
 
   useEffect(() => {
     const loadContent = async () => {
@@ -145,8 +143,15 @@ export function HomeContentAdmin() {
 
   const handleGenerateSlideImage = async (index: number) => {
     const slide = content.heroSlides[index];
-    const title = slide.title || content.heroTitle || '数字人';
-    const subtitle = slide.label || content.heroSubtitle || '实时渲染';
+    // ======== 严格防御：使用 trim()，确保空格字符串也被视为空（避免白屏）========
+    const title = (slide.title && slide.title.trim()) || (content.heroTitle && content.heroTitle.trim()) || '';
+
+    if (!title) {
+      alert('请先填写标题后再生成图片（可以填写轮播标题或首页主标题）');
+      return;
+    }
+
+    const subtitle = (slide.label && slide.label.trim()) || (content.heroSubtitle && content.heroSubtitle.trim()) || '';
 
     setIsGeneratingSlide(index);
     setSlideGenMessage('正在使用 AI 生成轮播图...');
@@ -156,48 +161,71 @@ export function HomeContentAdmin() {
         subtitle,
         (msg) => setSlideGenMessage(msg)
       );
+      if (!url) {
+        throw new Error('生成的图片地址为空');
+      }
       const newSlides = [...content.heroSlides];
       newSlides[index] = { ...newSlides[index], img: url };
       setContent(prev => ({ ...prev, heroSlides: newSlides }));
+      // ======== 关键修复：AI生成后自动切换到URL模式，确保能预览图片
+      setSlideImageSource('url');
       setSlideGenMessage('生成成功！');
     } catch (error) {
       console.error('生成轮播图失败:', error);
-      alert('生成失败，使用本地渐变图');
+      alert('生成失败，请重试或检查网络连接');
     } finally {
       setIsGeneratingSlide(null);
-      setTimeout(() => setSlideGenMessage(''), 3000);
-    }
-  };
-
-  const handleGenerateShareImage = async () => {
-    const title = content.shareTitle || '大连柒子文化';
-    const desc = content.shareDescription || '诚信立足 创新致远';
-    setIsGeneratingHeroImage(true);
-    setHeroImageGenMessage('正在使用 AI 生成分享缩略图...');
-    try {
-      const url = await generateShareImage(
-        title,
-        desc,
-        (msg) => setHeroImageGenMessage(msg)
-      );
-      setContent(prev => ({ ...prev, heroImage: url }));
-      setHeroImageGenMessage('生成成功！');
-    } catch (error) {
-      console.error('生成分享缩略图失败:', error);
-      alert('生成失败，请重试');
-    } finally {
-      setIsGeneratingHeroImage(false);
-      setTimeout(() => setHeroImageGenMessage(''), 3000);
+      setTimeout(() => setSlideGenMessage(''), 5000);
     }
   };
 
   const handleSubmit = async () => {
+    setIsLoading(true);
     try {
-      await saveHomeContent(content);
+      // 1. 将轮播图中的 AI 生成外链图片上传到 OSS（不保存本地）
+      const newSlides = [...content.heroSlides];
+      for (let i = 0; i < newSlides.length; i++) {
+        const slideImg = newSlides[i].img;
+        if (slideImg && (slideImg.startsWith('http://') || slideImg.startsWith('https://'))
+            && !slideImg.includes('aliyuncs.com') && !slideImg.includes('myqcloud.com')) {
+          try {
+            console.log(`[HomeContent] 轮播图${i + 1}转存OSS:`, slideImg.substring(0, 60));
+            const newUrl = await ensureImageOnOSS(slideImg);
+            newSlides[i] = { ...newSlides[i], img: newUrl };
+            console.log(`[HomeContent] ✅ 轮播图${i + 1}转存成功:`, newUrl.substring(0, 60));
+          } catch (err) {
+            console.warn(`[HomeContent] 第${i + 1}张轮播图上传失败，保留原链接:`, err);
+          }
+        }
+      }
+
+      // 2. 将分享缩略图中的 AI 生成外链图片上传到 OSS
+      let newHeroImage = content.heroImage;
+      if (newHeroImage && (newHeroImage.startsWith('http://') || newHeroImage.startsWith('https://'))
+          && !newHeroImage.includes('aliyuncs.com') && !newHeroImage.includes('myqcloud.com')) {
+        try {
+          console.log('[HomeContent] 分享缩略图转存OSS:', newHeroImage.substring(0, 60));
+          newHeroImage = await ensureImageOnOSS(newHeroImage);
+          console.log('[HomeContent] ✅ 分享缩略图转存成功:', newHeroImage.substring(0, 60));
+        } catch (err) {
+          console.warn('[HomeContent] 分享缩略图上传失败，保留原链接:', err);
+        }
+      }
+
+      const finalContent = {
+        ...content,
+        heroSlides: newSlides,
+        heroImage: newHeroImage
+      };
+
+      setContent(finalContent);
+      await saveHomeContent(finalContent);
       alert('首页内容已更新！');
     } catch (error) {
       console.error('Failed to save home content:', error);
       alert('保存失败，请重试');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -422,7 +450,7 @@ export function HomeContentAdmin() {
                           )}
 
                           {slideImageSource === 'url' && (
-                            <div className="space-y-2">
+                            <div className="space-y-3">
                               <input
                                 type="text"
                                 value={slide.img}
@@ -432,7 +460,14 @@ export function HomeContentAdmin() {
                               />
                               {slide.img && (
                                 <div className="rounded-lg overflow-hidden border border-white/10">
-                                  <img src={slide.img} alt={`Slide ${index + 1}`} className="w-full h-32 object-cover" />
+                                  <img
+                                    src={slide.img}
+                                    alt={`Slide ${index + 1}`}
+                                    className="w-full h-32 object-cover"
+                                    onError={(e) => {
+                                      (e.target as HTMLImageElement).style.display = 'none';
+                                    }}
+                                  />
                                 </div>
                               )}
                             </div>
@@ -540,31 +575,7 @@ export function HomeContentAdmin() {
                     <Link className="w-3 h-3" />
                     URL
                   </button>
-                  <button
-                    onClick={handleGenerateShareImage}
-                    disabled={isGeneratingHeroImage}
-                    className="flex items-center gap-2 px-3 py-1 rounded border text-xs transition-all bg-gradient-to-r from-purple-500/20 to-pink-500/20 border-purple-500/50 text-purple-400 hover:from-purple-500/30 hover:to-pink-500/30 disabled:opacity-50"
-                  >
-                    {isGeneratingHeroImage ? (
-                      <>
-                        <Loader2 className="w-3 h-3 animate-spin" />
-                        生成中...
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles className="w-3 h-3" />
-                        AI生成
-                      </>
-                    )}
-                  </button>
                 </div>
-
-                {isGeneratingHeroImage && heroImageGenMessage && (
-                  <div className="text-xs text-purple-400 flex items-center gap-2">
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                    {heroImageGenMessage}
-                  </div>
-                )}
 
                 {heroImageSource === 'upload' && (
                   <>
@@ -633,7 +644,7 @@ export function HomeContentAdmin() {
                 )}
 
                 {heroImageSource === 'url' && (
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     <input
                       type="text"
                       value={content.heroImage}
@@ -643,7 +654,14 @@ export function HomeContentAdmin() {
                     />
                     {content.heroImage && (
                       <div className="rounded-lg overflow-hidden border border-white/10">
-                        <img src={content.heroImage} alt="分享缩略图预览" className="w-full h-32 object-cover" />
+                        <img
+                          src={content.heroImage}
+                          alt="分享缩略图预览"
+                          className="w-full h-32 object-cover"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).style.display = 'none';
+                          }}
+                        />
                       </div>
                     )}
                   </div>

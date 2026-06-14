@@ -340,8 +340,11 @@ export function HomeView() {
                   <img
                     className="w-full h-full object-cover"
                     alt={`Hero slide ${index + 1}`}
-                    src={slide.img}
+                    src={slide.img || '/images/hero-video.png'}
                     loading={index === 0 ? "eager" : "lazy"}
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src = '/images/hero-video.png';
+                    }}
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent z-10"></div>
                   <div 
@@ -451,8 +454,11 @@ export function HomeView() {
                     <img
                       className="w-full h-full object-cover"
                       alt={item.name}
-                      src={item.coverImage}
+                      src={item.coverImage || '/images/hero-home.png'}
                       loading="lazy"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src = '/images/hero-home.png';
+                      }}
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-surface-container-low via-transparent to-transparent"></div>
                     {item.icon && (
@@ -480,8 +486,11 @@ export function HomeView() {
                     <img
                       className="w-full h-full object-cover"
                       alt={item.title}
-                      src={item.img}
+                      src={item.img || '/images/hero-home.png'}
                       loading="lazy"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src = '/images/hero-home.png';
+                      }}
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-surface-container-low via-transparent to-transparent"></div>
                   </div>
@@ -518,8 +527,11 @@ export function HomeView() {
                 <img
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-1000"
                   alt={work.title}
-                  src={work.img}
+                  src={work.img || '/images/hero-home.png'}
                   loading="lazy"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).src = '/images/hero-home.png';
+                  }}
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-60 group-hover:opacity-100 transition-opacity" />
                 

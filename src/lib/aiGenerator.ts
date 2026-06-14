@@ -1,9 +1,93 @@
 import { matchIconByKeywords, iconPresets } from './iconPresets';
+import { uploadImage, UploadResult } from './ossUtils';
 
 // 封面图请求超时（AI 生图可能需要几十秒）
 const COVER_TIMEOUT_MS = 60000;
 // 图标请求超时
 const ICON_TIMEOUT_MS = 10000;
+
+// 判断 URL 是否为本地/OSS 资源（不需要额外上传）
+function isLocalOrOSS(url: string): boolean {
+  if (!url) return true;
+  if (url.startsWith('/')) return true; // 本地静态资源路径
+  if (url.startsWith('data:image/')) return false; // data URI 视为外部（需要转存）
+  if (url.includes('aliyuncs.com')) return true; // 阿里云 OSS
+  if (url.includes('myqcloud.com')) return true; // 腾讯云 COS
+  return false;
+}
+
+// 根据 MIME 类型推断文件扩展名
+function getExtensionFromMime(mimeType: string): string {
+  const map: { [key: string]: string } = {
+    'image/jpeg': 'jpg',
+    'image/jpg': 'jpg',
+    'image/png': 'png',
+    'image/webp': 'webp',
+    'image/gif': 'gif',
+    'image/svg+xml': 'svg'
+  };
+  return map[mimeType] || 'png';
+}
+
+/**
+ * 将 AI 生成的外链图片（或 data URI）转换为 OSS 资源
+ * - 如果已是本地/OSS 路径，原样返回
+ * - 如果是外链/AI 生成：先尝试浏览器直接fetch下载 → 上传OSS
+ * - 如果浏览器因CORS限制无法fetch → 发送URL到后端 /api/upload/from-url 代理
+ * - 如果下载失败（如跨域），返回原 URL 作为兜底
+ */
+export async function ensureImageOnOSS(url: string): Promise<string> {
+  if (!url) return url;
+  if (isLocalOrOSS(url)) return url;
+
+  console.log('[ensureImageOnOSS] 将AI生成图片上传到OSS:', url.substring(0, 80));
+
+  try {
+    // 情况1: data URI（本地兜底的渐变 SVG 等）
+    if (url.startsWith('data:image/')) {
+      const match = url.match(/^data:([^;]+);base64,(.+)$/);
+      if (!match) return url;
+      const mimeType = match[1];
+      const base64Data = match[2];
+      const binaryString = atob(base64Data);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      const blob = new Blob([bytes], { type: mimeType });
+      const file = new File([blob], `ai-generated-${Date.now()}.${getExtensionFromMime(mimeType)}`, { type: mimeType });
+      const result: UploadResult = await uploadImage(file);
+      console.log('[ensureImageOnOSS] ✅ data URI 上传成功:', result.url.substring(0, 60));
+      return result.url;
+    }
+
+    // 情况2: 所有远程 HTTP/HTTPS 外链（GeekAI / Pollinations / Picsum 等）
+    // 直接走后端代理：由服务器下载到内存 buffer → 上传 OSS
+    // 不经过浏览器中转（避免 CORS + 双份传输），不写入服务器本地文件
+    const proxyResponse = await fetch('/api/upload/from-url', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url })
+    });
+
+    if (!proxyResponse.ok) {
+      const errData = await proxyResponse.json().catch(() => ({}));
+      throw new Error(errData.error || errData.message || `后端代理上传失败 (HTTP ${proxyResponse.status})`);
+    }
+
+    const proxyData = await proxyResponse.json();
+    if (proxyData.url) {
+      console.log('[ensureImageOnOSS] ✅ 后端代理上传成功:', proxyData.url.substring(0, 80));
+      return proxyData.url;
+    }
+    throw new Error('后端代理返回无有效 URL');
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.warn('[ensureImageOnOSS] 上传失败，保留原URL:', msg);
+    // 失败时保留原 URL（AI 外链仍可直接访问），但明确抛出信息供调用方决定
+    throw new Error(`图片上传OSS失败：${msg}`);
+  }
+}
 
 async function fetchWithTimeout(
   url: string,
@@ -27,7 +111,12 @@ async function fetchWithTimeout(
 
 /**
  * 生成封面图
- * 策略：优先调用后端 API（GeekAI gpt-image-2 -> z-image-turbo -> Pollinations.ai -> LoremFlickr -> 渐变SVG）
+ * 多级降级策略：
+ *   1. 后端 GeekAI API（付费，首选，返回远程URL）
+ *   2. 浏览器直接访问 Pollinations.ai（免费AI生图）
+ *   3. 浏览器直接访问 Picsum Photos（稳定真实图片）
+ *   4. 本地 SVG 渐变（最终兜底）
+ *
  * @param onProgress - 可选的进度回调，用于 UI 展示当前状态
  * @param imageType - 图片用途类型:
  *   - 'cover' 分类卡片封面 (1024x576, 16:9)
@@ -40,31 +129,94 @@ export async function generateCoverImage(
   onProgress?: (message: string, usedModel?: string) => void,
   imageType: 'cover' | 'hero' | 'share' = 'cover'
 ): Promise<string> {
-  try {
-    console.log(`[aiGenerator] 请求封面图: ${categoryName}, 类型: ${imageType}`);
-    if (onProgress) onProgress('正在请求服务器生成图片...');
+  const trimmedName = String(categoryName || '').trim();
+  if (!trimmedName) {
+    throw new Error('请输入分类名称或标题');
+  }
 
+  const sizeMap = {
+    cover: { width: 1024, height: 576 },
+    hero:  { width: 1280, height: 720 },
+    share: { width: 1024, height: 1024 },
+  };
+  const { width, height } = sizeMap[imageType] || sizeMap.cover;
+  const seed = Math.floor(Math.random() * 10000000);
+  const enPrompt = `professional photography, ${trimmedName} theme, modern design, high quality, 4k`;
+
+  console.log(`[aiGenerator] 请求封面图: ${trimmedName}, 类型: ${imageType}`);
+
+  // ========== 第1步：后端 GeekAI API ==========
+  if (onProgress) onProgress('正在使用 AI 生成图片...', 'GeekAI');
+  try {
     const response = await fetchWithTimeout('/api/ai/generate-cover', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ categoryName, description, imageType })
+      body: JSON.stringify({ categoryName: trimmedName, description, imageType })
     }, COVER_TIMEOUT_MS);
 
     const data = await response.json();
     if (data.success && data.data && data.data.url) {
-      console.log(`[aiGenerator] 封面图成功: ${data.data.url}, 使用模型: ${data.usedModel}`);
-      if (data.progress && data.progress.length > 0) {
-        const lastStep = data.progress[data.progress.length - 1];
-        if (onProgress) onProgress(lastStep.message, data.usedModel);
-      }
+      console.log(`[aiGenerator] ✅ 后端API成功: ${data.data.url.substring(0, 60)}, 模型: ${data.usedModel}`);
+      if (onProgress) onProgress('生成成功！（浏览器直接加载）', data.usedModel);
       return data.data.url;
     }
-    throw new Error(`API 响应异常: ${JSON.stringify(data)}`);
+    console.log(`[aiGenerator] 后端API返回失败: ${data.message || '未知原因'}`);
   } catch (error) {
-    console.warn('[aiGenerator] 封面图 API 失败，使用本地渐变:', error);
-    if (onProgress) onProgress('请求超时或失败，使用本地渐变图');
-    return generateLocalFallback(categoryName);
+    console.warn('[aiGenerator] 后端API异常:', error);
   }
+
+  // ========== 第2步：浏览器直接访问 Pollinations.ai（免费AI生图） ==========
+  if (onProgress) onProgress('正在从 Pollinations.ai 生成图片...', 'Pollinations');
+  const pollinationUrls = [
+    `https://image.pollinations.ai/prompt/${encodeURIComponent(enPrompt)}?width=${width}&height=${height}&nologo=true&enhance=true&seed=${seed}`,
+    `https://image.pollinations.ai/prompt/${encodeURIComponent(enPrompt)}?width=${width}&height=${height}&nologo=true&seed=${seed + 1}`,
+  ];
+
+  for (let i = 0; i < pollinationUrls.length; i++) {
+    try {
+      const response = await fetchWithTimeout(pollinationUrls[i], {
+        method: 'GET',
+        headers: { 'User-Agent': 'Mozilla/5.0' }
+      }, 45000);
+
+      if (response.ok) {
+        const blob = await response.blob();
+        if (blob.size > 5000) {
+          console.log(`[aiGenerator] ✅ Pollinations 成功! 大小: ${blob.size} bytes`);
+          if (onProgress) onProgress('生成成功！（AI生图）', 'Pollinations.ai');
+          return pollinationUrls[i]; // 直接返回远程URL
+        }
+      }
+    } catch (err) {
+      console.warn(`[aiGenerator] Pollinations 尝试 ${i+1} 失败:`, err);
+    }
+  }
+
+  // ========== 第3步：浏览器直接访问 Picsum Photos（稳定真实图片） ==========
+  if (onProgress) onProgress('正在从 Picsum 获取图片...', 'Picsum');
+  try {
+    const picsumUrl = `https://picsum.photos/seed/${encodeURIComponent(trimmedName)}${seed}/${width}/${height}`;
+    const response = await fetchWithTimeout(picsumUrl, {
+      method: 'GET',
+      headers: { 'User-Agent': 'Mozilla/5.0' }
+    }, 20000);
+
+    if (response.ok) {
+      const blob = await response.blob();
+      if (blob.size > 5000) {
+        console.log(`[aiGenerator] ✅ Picsum 成功! 大小: ${blob.size} bytes`);
+        if (onProgress) onProgress('获取成功！（高质量图片）', 'Picsum Photos');
+        return picsumUrl;
+      }
+    }
+  } catch (err) {
+    console.warn('[aiGenerator] Picsum 失败:', err);
+  }
+
+  // ========== 最终兜底：本地 SVG 渐变 ==========
+  console.warn('[aiGenerator] 所有远程服务失败，使用本地渐变图');
+  if (onProgress) onProgress('远程服务不可用，使用本地渐变图', 'local-gradient');
+  return generateLocalFallback(trimmedName);
 }
 
 /**

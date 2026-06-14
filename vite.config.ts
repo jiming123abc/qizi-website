@@ -23,6 +23,18 @@ export default defineConfig(({mode}) => {
         '/api': {
           target: 'http://localhost:5000',
           changeOrigin: true,
+          configure: (proxy, _options) => {
+            proxy.on('error', (err, _req, _res) => {
+              console.log('proxy error', err);
+            });
+            // 设置代理超时为 120 秒，支持 AI 生图长时间请求
+            proxy.on('proxyReq', (proxyReq, req, _res) => {
+              req.setTimeout(120000);
+              proxyReq.setTimeout(120000);
+            });
+          },
+          timeout: 120000,
+          proxyTimeout: 120000,
         },
       },
     },

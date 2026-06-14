@@ -2,7 +2,7 @@
 import { Plus, GripVertical, ChevronUp, ChevronDown, Edit2, Trash2, Image, AlertCircle, Upload, Link as LinkIcon, Save, X, Sparkles } from 'lucide-react';
 import { getCategoriesWithDetails, addCategoryWithDetails, updateCategoryDetails, deleteCategoryWithDetails, CategoryWithDetails, updateCategoriesSortOrder } from '../../data/store';
 import { uploadImage } from '../../lib/ossUtils';
-import { generateCoverImage, generateIconSVG } from '../../lib/aiGenerator';
+import { generateCoverImage, generateIconSVG, ensureImageOnOSS } from '../../lib/aiGenerator';
 
 export function CategoriesAdmin() {
   const [categories, setCategories] = useState<CategoryWithDetails[]>([]);
@@ -23,17 +23,16 @@ export function CategoriesAdmin() {
     icon: ''
   });
 
-  const refreshCategories = async () => {
-    try {
-      const cats = await getCategoriesWithDetails();
-      setCategories(cats);
-    } catch (error) {
-      console.error('Failed to refresh categories:', error);
-    }
-  };
-
   useEffect(() => {
-    refreshCategories();
+    const loadCategories = async () => {
+      try {
+        const cats = await getCategoriesWithDetails();
+        setCategories(cats);
+      } catch (error) {
+        console.error('Failed to refresh categories:', error);
+      }
+    };
+    loadCategories();
   }, []);
 
   const handleCreate = () => {
@@ -46,12 +45,12 @@ export function CategoriesAdmin() {
   const handleEdit = (category: CategoryWithDetails) => {
     setEditingCategory(category);
     setFormData({
-      name: category.name,
+      name: category.name || '',
       description: category.description || '',
       coverImage: category.coverImage || '',
       icon: category.icon || ''
     });
-    setCoverImageSource(category.coverImage?.startsWith('http') ? 'url' : 'upload');
+    setCoverImageSource(category.coverImage && category.coverImage.startsWith('http') ? 'url' : 'upload');
     setViewMode('edit');
   };
 
@@ -60,7 +59,8 @@ export function CategoriesAdmin() {
       setIsLoading(true);
       try {
         await deleteCategoryWithDetails(id);
-        await refreshCategories();
+        const cats = await getCategoriesWithDetails();
+        setCategories(cats);
       } catch (error) {
         console.error('删除分类失败:', error);
         alert('删除失败，请重试');
@@ -85,41 +85,55 @@ export function CategoriesAdmin() {
   };
 
   const handleGenerateCover = async () => {
-    if (!formData.name.trim()) {
+    // ======== 严格防御：标题为空不允许生成（避免白屏报错）========
+    const trimmedName = (formData.name || '').trim();
+    if (!trimmedName) {
       alert('请先输入分类名称');
       return;
+    }
+
+    // 描述为空时提示用户（不强制阻塞，但建议填写以获得更好的生成效果）
+    if (!((formData.description || '').trim())) {
+      if (!confirm('建议先填写分类描述以获得更精准的封面图，是否继续？')) {
+        return;
+      }
     }
 
     setIsGeneratingCover(true);
     setCoverGenerationMessage('正在请求服务器生成图片...');
     try {
       const url = await generateCoverImage(
-        formData.name,
+        trimmedName,
         formData.description,
         (msg) => setCoverGenerationMessage(msg),
         'cover'
       );
+      if (!url) {
+        throw new Error('生成的图片为空');
+      }
+      // ======== 关键修复：AI生成图片后，自动切换到 URL 模式，让用户看到预览
       setFormData(prev => ({ ...prev, coverImage: url }));
+      // 自动切换到 URL 模式（以确保图片能被预览）
+      setCoverImageSource('url');
       setCoverGenerationMessage('生成成功！');
     } catch (error) {
       console.error('生成封面失败:', error);
       alert('生成失败，请检查网络或重试；系统已自动使用渐变图作为兜底。');
     } finally {
       setIsGeneratingCover(false);
-      // 3 秒后清除消息
-      setTimeout(() => setCoverGenerationMessage(''), 3000);
+      setTimeout(() => setCoverGenerationMessage(''), 5000);
     }
   };
 
   const handleGenerateIcon = async () => {
-    if (!formData.name.trim()) {
+    if (!(formData.name || '').trim()) {
       alert('请先输入分类名称');
       return;
     }
 
     setIsGeneratingIcon(true);
     try {
-      const svg = await generateIconSVG(formData.name, formData.description);
+      const svg = await generateIconSVG(formData.name || '', formData.description || '');
       setFormData(prev => ({ ...prev, icon: svg }));
     } catch (error) {
       console.error('生成图标失败:', error);
@@ -130,26 +144,40 @@ export function CategoriesAdmin() {
   };
 
   const handleSubmit = async () => {
-    if (!formData.name.trim()) {
+    if (!(formData.name || '').trim()) {
       alert('请输入分类名称');
       return;
     }
 
     setIsLoading(true);
     try {
+      let finalCoverImage = formData.coverImage;
+      if (finalCoverImage && (finalCoverImage.startsWith('http://') || finalCoverImage.startsWith('https://')) && !finalCoverImage.includes('aliyuncs.com') && !finalCoverImage.includes('myqcloud.com')) {
+        try {
+          console.log('[CategoriesAdmin] AI封面图转存 OSS:', finalCoverImage.substring(0, 60));
+          finalCoverImage = await ensureImageOnOSS(finalCoverImage);
+          setFormData(prev => ({ ...prev, coverImage: finalCoverImage }));
+          console.log('[CategoriesAdmin] 转存成功:', finalCoverImage.substring(0, 60));
+        } catch (err) {
+          console.warn('[CategoriesAdmin] 封面图转存OSS失败，保留原URL:', err);
+          alert('封面图上传至OSS失败，已保留原图片链接。请检查OSS配置后重试。');
+        }
+      }
+
       if (viewMode === 'create') {
-        await addCategoryWithDetails(formData.name.trim(), formData.description, formData.coverImage, formData.icon);
+        await addCategoryWithDetails(formData.name.trim(), formData.description, finalCoverImage, formData.icon);
       } else if (viewMode === 'edit' && editingCategory) {
         await updateCategoryDetails(editingCategory.id, {
           name: formData.name.trim(),
           description: formData.description,
-          coverImage: formData.coverImage,
+          coverImage: finalCoverImage,
           icon: formData.icon
         });
       }
 
       setViewMode('list');
-      await refreshCategories();
+      const cats = await getCategoriesWithDetails();
+      setCategories(cats);
     } catch (error) {
       console.error('保存分类失败:', error);
       alert('保存失败，请重试');
@@ -370,13 +398,27 @@ export function CategoriesAdmin() {
                     )}
                   </div>
                 ) : (
-                  <input
-                    type="text"
-                    value={formData.coverImage}
-                    onChange={(e) => setFormData(prev => ({ ...prev, coverImage: e.target.value }))}
-                    className="w-full px-4 py-3 rounded-xl bg-surface-container-low border border-white/5 text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none focus:border-primary/50 transition-colors"
-                    placeholder="输入图片URL地址"
-                  />
+                  <div className="space-y-3">
+                    <input
+                      type="text"
+                      value={formData.coverImage}
+                      onChange={(e) => setFormData(prev => ({ ...prev, coverImage: e.target.value }))}
+                      className="w-full px-4 py-3 rounded-xl bg-surface-container-low border border-white/5 text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none focus:border-primary/50 transition-colors"
+                      placeholder="输入图片URL地址"
+                    />
+                    {formData.coverImage && (
+                      <div className="relative w-full max-w-xs">
+                        <img
+                          src={formData.coverImage}
+                          alt="封面预览"
+                          className="w-full h-auto rounded-xl object-cover"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).style.display = 'none';
+                          }}
+                        />
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
 
@@ -515,6 +557,9 @@ export function CategoriesAdmin() {
                     src={category.coverImage}
                     alt={category.name}
                     className="w-10 h-10 sm:w-12 sm:h-12 rounded-lg object-cover flex-shrink-0"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src = '/images/hero-home.png';
+                    }}
                   />
                 ) : (
                   <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-lg bg-black/20 flex items-center justify-center flex-shrink-0">
