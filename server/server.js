@@ -758,7 +758,7 @@ app.post('/api/video/snapshots', express.json({ limit: '1mb' }), async (req, res
       tempFiles.push(outputPath);
       try {
         await new Promise((resolve, reject) => {
-          const frameTimeout = setTimeout(() => reject(new Error('截图超时')), 25000);
+          const frameTimeout = setTimeout(() => reject(new Error('截图超时')), 45000);
           ffmpeg(videoUrl)
             .seekInput(t)
             .frames(1)
