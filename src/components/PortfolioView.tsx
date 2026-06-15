@@ -197,7 +197,7 @@ export function PortfolioView() {
                         </span>
                       )}
                       {item.tag && !/^\d+$/.test(item.tag) && (
-                        <span className="px-2.5 py-1 rounded-lg bg-white/5 backdrop-blur-md border border-white/10 text-white/40 text-[9px] font-label uppercase tracking-[0.25em]">
+                        <span className={`px-2.5 py-1 rounded-lg bg-black/40 backdrop-blur-md border border-white/10 text-[9px] font-label uppercase tracking-[0.25em] ${item.color}`}>
                           {item.tag}
                         </span>
                       )}

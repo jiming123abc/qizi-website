@@ -546,7 +546,7 @@ export function HomeView() {
                   <span className={`px-2 py-0.5 rounded-sm bg-black/40 border border-white/10 text-[9px] font-label uppercase tracking-[0.2em] ${work.color}`}>
                     {work.category}
                   </span>
-                  <span className="px-2 py-0.5 rounded-sm bg-black/40 border border-white/10 text-white/50 text-[9px] font-label uppercase tracking-[0.2em]">
+                  <span className={`px-2 py-0.5 rounded-sm bg-black/40 border border-white/10 text-[9px] font-label uppercase tracking-[0.2em] ${work.color}`}>
                     {work.tag}
                   </span>
                 </div>
