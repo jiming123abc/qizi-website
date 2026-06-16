@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Upload, Play, Check, Trash2, X, FileVideo } from 'lucide-react';
+import { Upload, Play, Check, Trash2, X, FileVideo, GripVertical } from 'lucide-react';
 
 interface VideoItem {
   id: number;
@@ -9,6 +9,7 @@ interface VideoItem {
   status: 'pending' | 'done';
   size: number;
   duration?: number;
+  sortOrder: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -37,9 +38,25 @@ export function Video2Page() {
   const [isDragOver, setIsDragOver] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [stats, setStats] = useState({ pending: 0, done: 0, total: 0 });
+  const [draggingId, setDraggingId] = useState<number | null>(null);
+  const [dragOverId, setDragOverId] = useState<number | null>(null);
+  const [isSavingSort, setIsSavingSort] = useState(false);
+
+  // Touch 拖拽支持（移动端）
+  const listContainerRef = useRef<HTMLDivElement>(null);
+  const touchDragRef = useRef<{
+    active: boolean;
+    draggedId: number | null;
+    startY: number;
+    offsetY: number;
+    ghost: HTMLDivElement | null;
+    touchedCount: number;
+  } | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRefs = useRef<Map<number, HTMLVideoElement>>(new Map());
   const rafPendingRef = useRef<number | null>(null);
+  const saveSortDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // 加载视频列表
   const loadVideos = useCallback(async () => {
@@ -110,7 +127,7 @@ export function Video2Page() {
     };
   }, [currentTab, videos]);
 
-  // 视频文件选择
+  // 上传视频
   const handleFileSelect = (files: FileList | null) => {
     if (!files || files.length === 0) return;
     Array.from(files).forEach((file) => {
@@ -119,7 +136,6 @@ export function Video2Page() {
     });
   };
 
-  // 单个文件上传（OSS 预签名 URL 直传）
   const uploadSingleFile = async (file: File) => {
     const uploadId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const uploadingFile: UploadingFile = {
@@ -132,7 +148,6 @@ export function Video2Page() {
     setUploadingFiles((prev) => [uploadingFile, ...prev]);
 
     try {
-      // Step 1: 获取 OSS 预签名 URL (folder: 'video2')
       const presignRes = await fetch('/api/oss/presign', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -148,7 +163,6 @@ export function Video2Page() {
       }
       const { signedUrl, publicUrl, key } = presignData;
 
-      // Step 2: 直传 OSS
       await new Promise<void>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
         xhr.open('PUT', signedUrl);
@@ -178,7 +192,6 @@ export function Video2Page() {
         xhr.send(file);
       });
 
-      // Step 3: 通知服务器记录
       setUploadingFiles((prev) =>
         prev.map((f) => (f.id === uploadId ? { ...f, progress: 98 } : f))
       );
@@ -202,7 +215,6 @@ export function Video2Page() {
         prev.map((f) => (f.id === uploadId ? { ...f, progress: 100, status: 'done' } : f))
       );
 
-      // 刷新列表
       setTimeout(() => {
         setUploadingFiles((prev) => prev.filter((f) => f.id !== uploadId));
         loadVideos();
@@ -230,7 +242,6 @@ export function Video2Page() {
       });
       const data = await res.json();
       if (data.success) {
-        // 先更新内存状态，动画后再从列表移除（由 React 自动重新渲染）
         setVideos((prev) =>
           prev.map((v) => (v.id === video.id ? { ...v, status: newStatus } : v))
         );
@@ -284,12 +295,192 @@ export function Video2Page() {
     }
   };
 
-  // 注册 video 元素引用
   const registerVideoRef = (id: number, el: HTMLVideoElement | null) => {
     if (el) {
       videoRefs.current.set(id, el);
     } else {
       videoRefs.current.delete(id);
+    }
+  };
+
+  // ============ 拖拽排序核心逻辑 ============
+
+  // 保存排序到服务器（防抖）
+  const scheduleSaveSort = useCallback((newVideos: VideoItem[]) => {
+    if (saveSortDebounceRef.current) {
+      clearTimeout(saveSortDebounceRef.current);
+    }
+    saveSortDebounceRef.current = setTimeout(async () => {
+      setIsSavingSort(true);
+      try {
+        const orders = newVideos.map((v, idx) => ({ id: v.id, sortOrder: idx }));
+        const res = await fetch('/api/video2/sort', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ orders }),
+        });
+        const data = await res.json();
+        if (!data.success) {
+          console.warn('排序保存失败:', data.message);
+        }
+      } catch (e) {
+        console.error('排序保存异常:', e);
+      } finally {
+        setIsSavingSort(false);
+      }
+    }, 400);
+  }, []);
+
+  // 移动视频到新位置（本地状态立即更新）
+  const moveVideo = useCallback(
+    (fromId: number, toId: number) => {
+      setVideos((prev) => {
+        // 先按当前 tab 过滤
+        const currentStatus =
+          prev.find(v => v.id === fromId)?.status || 'pending';
+        const filtered = prev.filter(v => v.status === currentStatus);
+        const fromIdx = filtered.findIndex(v => v.id === fromId);
+        let toIdx = filtered.findIndex(v => v.id === toId);
+        if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return prev;
+
+        const nextFiltered = [...filtered];
+        const [moved] = nextFiltered.splice(fromIdx, 1);
+        nextFiltered.splice(toIdx, 0, moved);
+
+        // 把新顺序放回全部 videos
+        const nextAll = [...prev];
+        let fIdx = 0;
+        for (let i = 0; i < nextAll.length; i++) {
+          if (nextAll[i].status === currentStatus) {
+            nextAll[i] = nextFiltered[fIdx++];
+          }
+        }
+        scheduleSaveSort(nextAll);
+        return nextAll;
+      });
+    },
+    [scheduleSaveSort]
+  );
+
+  // HTML5 原生拖拽（桌面端）
+  const onCardDragStart = (e: React.DragEvent<HTMLDivElement>, id: number) => {
+    setDraggingId(id);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', String(id));
+    // 让 drag 图像为整张卡片（浏览器默认已支持）
+  };
+
+  const onCardDragOver = (e: React.DragEvent<HTMLDivElement>, id: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (dragOverId !== id) {
+      setDragOverId(id);
+    }
+  };
+
+  const onCardDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    // 用 setTimeout 判断是否真正离开
+    const related = e.relatedTarget as HTMLElement | null;
+    if (!related || !related.closest('[data-video-card]')) {
+      setDragOverId(null);
+    }
+  };
+
+  const onCardDrop = (e: React.DragEvent<HTMLDivElement>, targetId: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const sourceIdStr = e.dataTransfer.getData('text/plain');
+    const sourceId = sourceIdStr ? parseInt(sourceIdStr) : draggingId;
+    setDraggingId(null);
+    setDragOverId(null);
+    if (sourceId && sourceId !== targetId) {
+      moveVideo(sourceId, targetId);
+    }
+  };
+
+  const onCardDragEnd = () => {
+    setDraggingId(null);
+    setDragOverId(null);
+  };
+
+  // 触摸拖拽（移动端）- 在拖动手柄上触发
+  const onHandleTouchStart = (e: React.TouchEvent, videoId: number, rect: DOMRect) => {
+    // 初始化状态
+    const t = e.touches[0];
+    touchDragRef.current = {
+      active: true,
+      draggedId: videoId,
+      startY: t.clientY,
+      offsetY: 0,
+      ghost: null,
+      touchedCount: 0,
+    };
+    setDraggingId(videoId);
+    // 防止滚动
+    e.preventDefault();
+
+    // 创建 ghost 元素
+    const card = (e.currentTarget as HTMLElement).closest('[data-video-card]');
+    if (card) {
+      const ghost = (card as HTMLElement).cloneNode(true) as HTMLDivElement;
+      ghost.style.position = 'fixed';
+      ghost.style.left = rect.left + 'px';
+      ghost.style.top = rect.top + 'px';
+      ghost.style.width = rect.width + 'px';
+      ghost.style.zIndex = '9999';
+      ghost.style.opacity = '0.85';
+      ghost.style.pointerEvents = 'none';
+      ghost.style.transform = 'scale(0.95)';
+      ghost.style.boxShadow = '0 8px 24px rgba(0,0,0,0.5)';
+      // 移除 ghost 中的 video 元素（防止播放干扰）
+      const ghostVideo = ghost.querySelector('video');
+      if (ghostVideo) ghostVideo.remove();
+      document.body.appendChild(ghost);
+      touchDragRef.current!.ghost = ghost;
+    }
+  };
+
+  const onHandleTouchMove = (e: React.TouchEvent) => {
+    const st = touchDragRef.current;
+    if (!st || !st.active || !st.ghost) return;
+    e.preventDefault();
+    const t = e.touches[0];
+    st.offsetY = t.clientY - st.startY;
+    const startTop = parseFloat(st.ghost.style.top) || 0;
+    st.ghost.style.top = (startTop + st.offsetY) + 'px';
+
+    // 悬停检测：获取当前手指位置下的卡片
+    st.ghost.style.pointerEvents = 'none';
+    const elAtPoint = document.elementFromPoint(t.clientX, t.clientY);
+    const targetCard = elAtPoint?.closest('[data-video-card]') as HTMLElement | null;
+    if (targetCard) {
+      const id = parseInt(targetCard.getAttribute('data-id') || '0');
+      if (id && id !== st.draggedId) {
+        setDragOverId(id);
+        return;
+      }
+    }
+    setDragOverId(null);
+  };
+
+  const onHandleTouchEnd = (e: React.TouchEvent) => {
+    const st = touchDragRef.current;
+    if (!st || !st.active) return;
+    const draggedId = st.draggedId;
+    const targetId = dragOverId;
+
+    // 清理 ghost
+    if (st.ghost && st.ghost.parentNode) {
+      st.ghost.parentNode.removeChild(st.ghost);
+    }
+    st.active = false;
+    st.draggedId = null;
+    st.ghost = null;
+    setDraggingId(null);
+    setDragOverId(null);
+
+    if (draggedId && targetId && draggedId !== targetId) {
+      moveVideo(draggedId, targetId);
     }
   };
 
@@ -307,6 +498,7 @@ export function Video2Page() {
               </h1>
               <p className="text-sm text-on-surface-variant/70 mt-1">
                 共 {stats.total} 个视频 · 未拍摄 {stats.pending} · 已拍摄 {stats.done}
+                {isSavingSort && ' · 保存排序中...'}
               </p>
             </div>
             <button
@@ -453,6 +645,13 @@ export function Video2Page() {
             </button>
           </div>
 
+          {/* 提示栏 */}
+          {!isLoading && filteredVideos.length > 0 && (
+            <div className="text-xs text-on-surface-variant/60 mb-3 text-center">
+              拖拽左侧 ⋮⋮ 手柄或长按卡片可调整顺序
+            </div>
+          )}
+
           {/* 视频列表 */}
           {isLoading ? (
             <div className="text-center py-16 text-on-surface-variant/70">加载中...</div>
@@ -469,12 +668,26 @@ export function Video2Page() {
               </p>
             </div>
           ) : (
-            <div className="space-y-4">
+            <div ref={listContainerRef} className="space-y-4">
               {filteredVideos.map((video) => (
                 <div
                   key={video.id}
-                  className={`bg-surface-container border border-white/10 rounded-2xl overflow-hidden transition-all ${
-                    video.status === 'done' ? 'opacity-75' : ''
+                  data-video-card
+                  data-id={video.id}
+                  draggable
+                  onDragStart={(e) => onCardDragStart(e, video.id)}
+                  onDragOver={(e) => onCardDragOver(e, video.id)}
+                  onDragLeave={onCardDragLeave}
+                  onDrop={(e) => onCardDrop(e, video.id)}
+                  onDragEnd={onCardDragEnd}
+                  className={`bg-surface-container border rounded-2xl overflow-hidden transition-all select-none ${
+                    draggingId === video.id
+                      ? 'opacity-40 border-violet-400 scale-[0.98]'
+                      : dragOverId === video.id
+                      ? 'border-violet-400 shadow-lg shadow-violet-500/20'
+                      : 'border-white/10'
+                  } ${
+                    video.status === 'done' ? 'opacity-90' : ''
                   }`}
                 >
                   {/* 视频播放器 */}
@@ -496,6 +709,26 @@ export function Video2Page() {
 
                   {/* 底部信息栏 */}
                   <div className="flex items-center gap-3 p-3 md:p-4">
+                    {/* 拖拽手柄 */}
+                    <div
+                      className="flex items-center justify-center flex-shrink-0 w-8 h-8 rounded-lg text-on-surface-variant/60 hover:text-violet-400 hover:bg-violet-500/20 cursor-grab active:cursor-grabbing transition-all"
+                      title="拖动调整顺序"
+                      onTouchStart={(e) => {
+                        const card = (e.currentTarget as HTMLElement).closest(
+                          '[data-video-card]'
+                        ) as HTMLElement;
+                        if (card) {
+                          const rect = card.getBoundingClientRect();
+                          onHandleTouchStart(e, video.id, rect);
+                        }
+                      }}
+                      onTouchMove={onHandleTouchMove}
+                      onTouchEnd={onHandleTouchEnd}
+                      onTouchCancel={onHandleTouchEnd}
+                    >
+                      <GripVertical className="w-5 h-5" />
+                    </div>
+
                     {/* 复选框 */}
                     <button
                       onClick={() => toggleVideoStatus(video)}
@@ -504,7 +737,11 @@ export function Video2Page() {
                           ? 'bg-green-500 border-green-500'
                           : 'border-white/30 hover:border-violet-400 hover:bg-violet-500/20'
                       }`}
-                      title={video.status === 'done' ? '点击移回"未拍摄"' : '点击标记为"已拍摄"'}
+                      title={
+                        video.status === 'done'
+                          ? '点击移回"未拍摄"'
+                          : '点击标记为"已拍摄"'
+                      }
                     >
                       {video.status === 'done' && (
                         <Check className="w-4 h-4 text-white" strokeWidth={3} />

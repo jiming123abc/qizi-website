@@ -2595,6 +2595,30 @@ app.delete('/api/video2/:id', async (req, res) => {
   }
 });
 
+app.put('/api/video2/sort', express.json({ limit: '1mb' }), async (req, res) => {
+  try {
+    const { orders } = req.body;
+    if (!Array.isArray(orders) || orders.length === 0) {
+      return res.status(400).json({ success: false, message: '参数 orders 应为非空数组' });
+    }
+    const normalized = orders
+      .filter(function(item) {
+        return item && typeof item.id === 'number' && typeof item.sortOrder === 'number';
+      })
+      .map(function(item) {
+        return { id: item.id, sortOrder: item.sortOrder };
+      });
+    if (normalized.length === 0) {
+      return res.status(400).json({ success: false, message: '参数 orders 无效' });
+    }
+    await db.video2Items.updateSort(normalized);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('[video2] 更新排序失败:', error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // 动态渲染 index.html（服务端预渲染 meta 标签）
 app.get('*', async (req, res) => {
   try {

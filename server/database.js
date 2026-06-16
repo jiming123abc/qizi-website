@@ -692,12 +692,27 @@ function initVideo2Database() {
         status TEXT NOT NULL DEFAULT 'pending',
         size INTEGER,
         duration REAL,
+        sortOrder INTEGER DEFAULT 0,
         createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
         updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
+    // 对旧数据补 sortOrder（按创建顺序分配 0,1,2...）
+    video2Db.run('PRAGMA table_info(videos)', function(err, columns) {
+      if (err) return;
+      const colNames = columns.map(c => c.name);
+      if (!colNames.includes('sortOrder')) {
+        video2Db.run('ALTER TABLE videos ADD COLUMN sortOrder INTEGER DEFAULT 0');
+        video2Db.all('SELECT id FROM videos ORDER BY createdAt ASC, id ASC', function(err, rows) {
+          if (err) return;
+          rows.forEach((r, i) => {
+            video2Db.run('UPDATE videos SET sortOrder = ? WHERE id = ?', [i, r.id]);
+          });
+        });
+      }
+    });
     video2Db.run('CREATE INDEX IF NOT EXISTS idx_videos_status ON videos(status)');
-    video2Db.run('CREATE INDEX IF NOT EXISTS idx_videos_created ON videos(createdAt DESC)');
+    video2Db.run('CREATE INDEX IF NOT EXISTS idx_videos_sort ON videos(sortOrder)');
     console.log('[video2] 表结构已就绪');
   });
 }
@@ -731,11 +746,11 @@ const video2Async = {
 
 const video2Items = {
   getAll: async () => {
-    return await video2Async.all('SELECT * FROM videos ORDER BY createdAt DESC, id DESC');
+    return await video2Async.all('SELECT * FROM videos ORDER BY sortOrder ASC, id ASC');
   },
   getByStatus: async (status) => {
     return await video2Async.all(
-      'SELECT * FROM videos WHERE status = ? ORDER BY createdAt DESC, id DESC',
+      'SELECT * FROM videos WHERE status = ? ORDER BY sortOrder ASC, id ASC',
       [status]
     );
   },
@@ -749,18 +764,22 @@ const video2Items = {
     return map;
   },
   create: async (item) => {
+    // 计算当前最大 sortOrder
+    const maxRow = await video2Async.get('SELECT MAX(sortOrder) as maxSort FROM videos');
+    const nextSort = ((maxRow && maxRow.maxSort != null) ? maxRow.maxSort : -1) + 1;
     const result = await video2Async.run(
-      'INSERT INTO videos (title, filename, url, status, size, duration) VALUES (?, ?, ?, ?, ?, ?)',
+      'INSERT INTO videos (title, filename, url, status, size, duration, sortOrder) VALUES (?, ?, ?, ?, ?, ?, ?)',
       [
         item.title,
         item.filename,
         item.url,
         item.status || 'pending',
         item.size || null,
-        item.duration || null
+        item.duration || null,
+        nextSort
       ]
     );
-    return { id: result.lastID, ...item };
+    return { id: result.lastID, sortOrder: nextSort, ...item };
   },
   updateStatus: async (id, status) => {
     const result = await video2Async.run(
@@ -768,6 +787,16 @@ const video2Items = {
       [status, id]
     );
     return result.changes > 0;
+  },
+  updateSort: async (orders) => {
+    // orders: [{ id, sortOrder }]
+    for (const item of orders) {
+      await video2Async.run(
+        'UPDATE videos SET sortOrder = ?, updatedAt = CURRENT_TIMESTAMP WHERE id = ?',
+        [item.sortOrder, item.id]
+      );
+    }
+    return true;
   },
   delete: async (id) => {
     const result = await video2Async.run('DELETE FROM videos WHERE id = ?', [id]);
