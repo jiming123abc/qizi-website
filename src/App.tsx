@@ -24,6 +24,7 @@ import { Login } from './components/admin/Login';
 import { Settings } from 'lucide-react';
 import { setupShareMetadata } from './lib/shareUtils';
 import { getHomeContent } from './data/store';
+import { Video2Page } from './components/Video2Page';
 
 type Tab = 'home' | 'team' | 'services' | 'portfolio' | 'search';
 type AdminTab = 'dashboard' | 'portfolio' | 'categories' | 'featured' | 'home' | 'team' | 'storage';
@@ -36,8 +37,16 @@ export default function App() {
   const [isAdminMode, setIsAdminMode] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [adminTab, setAdminTab] = useState<AdminTab>('dashboard');
+  const [isVideo2Page, setIsVideo2Page] = useState(false);
 
   useEffect(() => {
+    // 检测是否为 video2 路径
+    const path = window.location.pathname;
+    if (path === '/video2' || path.startsWith('/video2/')) {
+      setIsVideo2Page(true);
+      return;
+    }
+
     const params = new URLSearchParams(window.location.search);
     const id = params.get('id');
     if (id) {
@@ -109,6 +118,11 @@ export default function App() {
   };
 
   const navTab = activeTab === 'search' ? 'home' : activeTab;
+
+  // 视频片段管理页面
+  if (isVideo2Page) {
+    return <Video2Page />;
+  }
 
   if (isAdminMode) {
     if (!isLoggedIn) {

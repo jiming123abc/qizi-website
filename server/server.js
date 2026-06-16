@@ -2526,6 +2526,75 @@ app.post('/api/ai/generate-icon', async (req, res) => {
   }
 });
 
+// ==================== video2 视频片段管理 API ====================
+
+app.get('/api/video2/list', async (req, res) => {
+  try {
+    const items = await db.video2Items.getAll();
+    res.json({ success: true, data: items });
+  } catch (error) {
+    console.error('[video2] 获取列表失败:', error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+app.get('/api/video2/stats', async (req, res) => {
+  try {
+    const stats = await db.video2Items.getStats();
+    res.json({ success: true, data: stats });
+  } catch (error) {
+    console.error('[video2] 获取统计失败:', error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+app.post('/api/video2/add', express.json({ limit: '1mb' }), async (req, res) => {
+  try {
+    const { title, filename, url, size, duration } = req.body;
+    if (!title || !filename || !url) {
+      return res.status(400).json({ success: false, message: '缺少必要参数: title, filename, url' });
+    }
+    const item = await db.video2Items.create({ title, filename, url, size, duration, status: 'pending' });
+    console.log(`[video2] 新增视频: ${title}`);
+    res.json({ success: true, data: item });
+  } catch (error) {
+    console.error('[video2] 新增视频失败:', error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+app.put('/api/video2/:id/status', express.json({ limit: '1mb' }), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const { status } = req.body;
+    if (status !== 'pending' && status !== 'done') {
+      return res.status(400).json({ success: false, message: 'status 只能是 pending 或 done' });
+    }
+    const ok = await db.video2Items.updateStatus(id, status);
+    if (!ok) {
+      return res.status(404).json({ success: false, message: '视频不存在' });
+    }
+    res.json({ success: true });
+  } catch (error) {
+    console.error('[video2] 更新状态失败:', error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+app.delete('/api/video2/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const ok = await db.video2Items.delete(id);
+    if (!ok) {
+      return res.status(404).json({ success: false, message: '视频不存在' });
+    }
+    res.json({ success: true });
+  } catch (error) {
+    console.error('[video2] 删除失败:', error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // 动态渲染 index.html（服务端预渲染 meta 标签）
 app.get('*', async (req, res) => {
   try {

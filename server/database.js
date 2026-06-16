@@ -669,11 +669,118 @@ const categoriesDetails = {
   }
 };
 
+// ==================== video2 独立数据库（视频片段管理） ====================
+
+const video2DbPath = path.join(__dirname, 'video2.db');
+const video2Db = new sqlite3.Database(video2DbPath, (err) => {
+  if (err) {
+    console.error('[video2] 打开数据库失败:', err.message);
+  } else {
+    console.log('[video2] 已连接 SQLite 数据库');
+    initVideo2Database();
+  }
+});
+
+function initVideo2Database() {
+  video2Db.serialize(() => {
+    video2Db.run(`
+      CREATE TABLE IF NOT EXISTS videos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        filename TEXT NOT NULL,
+        url TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        size INTEGER,
+        duration REAL,
+        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    video2Db.run('CREATE INDEX IF NOT EXISTS idx_videos_status ON videos(status)');
+    video2Db.run('CREATE INDEX IF NOT EXISTS idx_videos_created ON videos(createdAt DESC)');
+    console.log('[video2] 表结构已就绪');
+  });
+}
+
+const video2Async = {
+  get: (sql, params = []) => {
+    return new Promise((resolve, reject) => {
+      video2Db.get(sql, params, (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      });
+    });
+  },
+  all: (sql, params = []) => {
+    return new Promise((resolve, reject) => {
+      video2Db.all(sql, params, (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows);
+      });
+    });
+  },
+  run: (sql, params = []) => {
+    return new Promise((resolve, reject) => {
+      video2Db.run(sql, params, function(err) {
+        if (err) reject(err);
+        else resolve({ lastID: this.lastID, changes: this.changes });
+      });
+    });
+  }
+};
+
+const video2Items = {
+  getAll: async () => {
+    return await video2Async.all('SELECT * FROM videos ORDER BY createdAt DESC, id DESC');
+  },
+  getByStatus: async (status) => {
+    return await video2Async.all(
+      'SELECT * FROM videos WHERE status = ? ORDER BY createdAt DESC, id DESC',
+      [status]
+    );
+  },
+  getStats: async () => {
+    const all = await video2Async.all('SELECT status, COUNT(*) as cnt FROM videos GROUP BY status');
+    const map = { pending: 0, done: 0, total: 0 };
+    all.forEach(r => {
+      map[r.status] = r.cnt;
+      map.total += r.cnt;
+    });
+    return map;
+  },
+  create: async (item) => {
+    const result = await video2Async.run(
+      'INSERT INTO videos (title, filename, url, status, size, duration) VALUES (?, ?, ?, ?, ?, ?)',
+      [
+        item.title,
+        item.filename,
+        item.url,
+        item.status || 'pending',
+        item.size || null,
+        item.duration || null
+      ]
+    );
+    return { id: result.lastID, ...item };
+  },
+  updateStatus: async (id, status) => {
+    const result = await video2Async.run(
+      'UPDATE videos SET status = ?, updatedAt = CURRENT_TIMESTAMP WHERE id = ?',
+      [status, id]
+    );
+    return result.changes > 0;
+  },
+  delete: async (id) => {
+    const result = await video2Async.run('DELETE FROM videos WHERE id = ?', [id]);
+    return result.changes > 0;
+  }
+};
+
 module.exports = {
   portfolioItems,
   featuredWorks,
   homeContent,
   teamMembers,
   categoriesDetails,
+  video2Items,
   db
 };
