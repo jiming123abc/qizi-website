@@ -1,6 +1,24 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Upload, Play, Check, Trash2, X, FileVideo, GripVertical } from 'lucide-react';
 
+// ==================== 浏览器环境检测 ====================
+const UA = typeof navigator !== 'undefined' ? navigator.userAgent : '';
+const isWeChat = /MicroMessenger/i.test(UA);
+// 微信中因浏览器策略限制，无法在非用户手势下自动播放视频
+// 对微信使用「点击播放」降级策略，其他浏览器使用「滚动自动播放」
+const USE_CLICK_TO_PLAY = isWeChat;
+
+// ==================== OSS 封面截图 URL ====================
+// 阿里云 OSS 的视频处理：t_1000 表示 1000ms 处截图，w_800 表示宽度 800px
+function getPosterUrl(videoUrl: string): string {
+  if (videoUrl.includes('qiziwenhua.top') || videoUrl.includes('aliyuncs.com')) {
+    return videoUrl + '?x-oss-process=video/snapshot,t_1000,f_jpg,w_800,m_fast';
+  }
+  return ''; // 非 OSS 视频：不拼接参数，走 video 首帧兜底
+}
+const POSTER_MAX_RETRY = 3;
+const POSTER_RETRY_DELAY = 1500;
+
 interface VideoItem {
   id: number;
   title: string;
@@ -58,6 +76,11 @@ export function Video2Page() {
   const rafPendingRef = useRef<number | null>(null);
   const saveSortDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // 海报图重试计数器（key: video.id, value: 当前已重试次数）
+  const posterRetryRef = useRef<Map<number, number>>(new Map());
+  // 海报图加载状态（true: 已加载成功 / 最终兜底显示 video 首帧）
+  const posterReadyRef = useRef<Map<number, boolean>>(new Map());
+
   // 加载视频列表
   const loadVideos = useCallback(async () => {
     try {
@@ -96,8 +119,17 @@ export function Video2Page() {
 
     setTimeout(() => {
       playLockRef.current = false;
+
+      // 微信浏览器：不做自动播放，但仍需暂停离开视口的视频
+      if (USE_CLICK_TO_PLAY) {
+        videoRefs.current.forEach((video) => {
+          if (!video.paused) video.pause();
+        });
+        nowPlayingIdRef.current = null;
+        return;
+      }
+
       if (visibleVideosRef.current.size === 0) {
-        // 没有可见视频 → 全部暂停
         videoRefs.current.forEach((video) => {
           if (!video.paused) video.pause();
         });
@@ -138,7 +170,11 @@ export function Video2Page() {
       videoRefs.current.forEach((video, id) => {
         if (id === targetId) {
           if (video.paused) {
-            video.play().catch(() => {});
+            // 捕获自动播放策略拒绝，避免控制台报错
+            video.play().catch((err) => {
+              // 被浏览器策略拒绝 → 后续切到手动播放模式即可，无需额外处理
+              if (err && err.name === 'NotAllowedError') return;
+            });
           }
         } else {
           if (!video.paused) {
@@ -305,25 +341,31 @@ export function Video2Page() {
     }
   };
 
-  // 点击视频：全屏播放
-  const handleVideoClick = (video: HTMLVideoElement) => {
-    // 先播放（确保 onPlay 触发 → 视频画面显现）
-    if (video.paused) {
-      const playPromise = video.play();
+  // 点击视频：暂停其他视频 → 播放当前 → 进入全屏
+  const handleVideoClick = (videoEl: HTMLVideoElement, videoId: number) => {
+    // 先暂停其他所有视频
+    videoRefs.current.forEach((v, id) => {
+      if (id !== videoId && !v.paused) v.pause();
+    });
+    nowPlayingIdRef.current = videoId;
+
+    // 播放当前视频（用户手势触发，微信中也能成功）
+    if (videoEl.paused) {
+      const playPromise = videoEl.play();
       if (playPromise && typeof playPromise.catch === 'function') {
         playPromise.catch(() => {});
       }
     }
     // iOS Safari 使用 webkitEnterFullscreen，其他浏览器使用标准 API
-    const v = video as any;
+    const v = videoEl as any;
     if (typeof v.webkitEnterFullscreen === 'function') {
       try { v.webkitEnterFullscreen(); return; } catch {}
     }
     if (typeof v.webkitRequestFullscreen === 'function') {
       try { v.webkitRequestFullscreen(); return; } catch {}
     }
-    if (typeof video.requestFullscreen === 'function') {
-      video.requestFullscreen().catch(() => {});
+    if (typeof videoEl.requestFullscreen === 'function') {
+      videoEl.requestFullscreen().catch(() => {});
     }
   };
 
@@ -348,52 +390,111 @@ export function Video2Page() {
     }
   };
 
-  // 初始化 IntersectionObserver
+  // 初始化 IntersectionObserver + scroll fallback
   useEffect(() => {
-    ioRef.current = new IntersectionObserver(
-      (entries) => {
-        let changed = false;
-        entries.forEach((entry) => {
-          // 从 video 元素反查 id — 通过 data-id 属性
-          const videoEl = entry.target as HTMLVideoElement;
-          const id = Number(videoEl.getAttribute('data-video-id'));
-          if (!id || isNaN(id)) return;
-          const ratio = entry.intersectionRatio;
-          if (ratio >= 0.6) {
-            if (visibleVideosRef.current.get(id) !== ratio) {
-              visibleVideosRef.current.set(id, ratio);
-              changed = true;
-            }
-          } else {
-            if (visibleVideosRef.current.has(id)) {
-              visibleVideosRef.current.delete(id);
-              changed = true;
-            }
+    const updateFromRects = () => {
+      // scroll fallback：通过 getBoundingClientRect 手动计算
+      let changed = false;
+      videoRefs.current.forEach((videoEl, id) => {
+        const rect = videoEl.getBoundingClientRect();
+        const viewportH = window.innerHeight || document.documentElement.clientHeight;
+        const viewportW = window.innerWidth || document.documentElement.clientWidth;
+        if (
+          rect.bottom <= 0 ||
+          rect.top >= viewportH ||
+          rect.right <= 0 ||
+          rect.left >= viewportW
+        ) {
+          if (visibleVideosRef.current.has(id)) {
+            visibleVideosRef.current.delete(id);
+            changed = true;
           }
-        });
-        if (changed) {
-          updatePlayingFromVisible();
+          return;
         }
-      },
-      {
-        threshold: [0.3, 0.5, 0.6, 0.7, 0.8],
-        root: null,
-      }
-    );
+        const visibleH = Math.min(rect.bottom, viewportH) - Math.max(rect.top, 0);
+        const visibleW = Math.min(rect.right, viewportW) - Math.max(rect.left, 0);
+        const elementArea = rect.width * rect.height;
+        const visibleArea = visibleH * visibleW;
+        const ratio = elementArea > 0 ? visibleArea / elementArea : 0;
+        if (ratio >= 0.6) {
+          if (visibleVideosRef.current.get(id) !== ratio) {
+            visibleVideosRef.current.set(id, ratio);
+            changed = true;
+          }
+        } else {
+          if (visibleVideosRef.current.has(id)) {
+            visibleVideosRef.current.delete(id);
+            changed = true;
+          }
+        }
+      });
+      if (changed) updatePlayingFromVisible();
+    };
 
-    // 绑定已有 video
-    videoRefs.current.forEach((el) => {
-      if (ioRef.current) ioRef.current.observe(el);
-    });
+    // 使用 IntersectionObserver（如果可用）
+    const supportsIO =
+      typeof window !== 'undefined' && 'IntersectionObserver' in window;
+    if (supportsIO) {
+      ioRef.current = new IntersectionObserver(
+        (entries) => {
+          let changed = false;
+          entries.forEach((entry) => {
+            const videoEl = entry.target as HTMLVideoElement;
+            const id = Number(videoEl.getAttribute('data-video-id'));
+            if (!id || isNaN(id)) return;
+            const ratio = entry.intersectionRatio;
+            if (ratio >= 0.6) {
+              if (visibleVideosRef.current.get(id) !== ratio) {
+                visibleVideosRef.current.set(id, ratio);
+                changed = true;
+              }
+            } else {
+              if (visibleVideosRef.current.has(id)) {
+                visibleVideosRef.current.delete(id);
+                changed = true;
+              }
+            }
+          });
+          if (changed) updatePlayingFromVisible();
+        },
+        {
+          threshold: [0.25, 0.4, 0.5, 0.6, 0.75, 0.9],
+          root: null,
+        }
+      );
+      videoRefs.current.forEach((el) => {
+        if (ioRef.current) ioRef.current.observe(el);
+      });
+    }
+
+    // scroll/resize fallback — 即使 IO 工作也保留作为兜底（防抖）
+    let rafId: number | null = null;
+    const onScrollOrResize = () => {
+      if (rafId !== null) return;
+      rafId = window.requestAnimationFrame(() => {
+        rafId = null;
+        if (supportsIO) {
+          // 有 IO 时只做一次同步（例如微信首次打开时 IO 未触发的场景）
+          updateFromRects();
+        } else {
+          updateFromRects();
+        }
+      });
+    };
+    window.addEventListener('scroll', onScrollOrResize, { passive: true });
+    window.addEventListener('resize', onScrollOrResize);
 
     // 初始化一次
-    const initTimer = setTimeout(() => updatePlayingFromVisible(), 300);
+    const initTimer = window.setTimeout(() => updateFromRects(), 300);
+    const initTimer2 = window.setTimeout(() => updateFromRects(), 1200);
 
     return () => {
-      clearTimeout(initTimer);
-      if (ioRef.current) {
-        ioRef.current.disconnect();
-      }
+      window.clearTimeout(initTimer);
+      window.clearTimeout(initTimer2);
+      window.removeEventListener('scroll', onScrollOrResize);
+      window.removeEventListener('resize', onScrollOrResize);
+      if (rafId !== null) window.cancelAnimationFrame(rafId);
+      if (ioRef.current) ioRef.current.disconnect();
     };
   }, [updatePlayingFromVisible]);
 
@@ -784,38 +885,70 @@ export function Video2Page() {
                     video.status === 'done' ? 'opacity-90' : ''
                   }`}
                 >
-                  {/* 视频播放器：海报图（显示）+ 视频（默认透明，播放时显现） */}
+                  {/* 视频播放区：海报图 + 播放按钮 + 视频元素 */}
                   <div className="relative bg-black aspect-video overflow-hidden">
-                    {/* 海报图：始终显示，由 CSS 控制显示/隐藏 */}
-                    <img
-                      data-poster={video.id}
-                      src={video.url.includes('qiziwenhua.top')
-                        ? video.url + '?x-oss-process=video/snapshot,t_1000,f_jpg,w_800,m_fast'
-                        : ''}
-                      alt={video.title}
-                      className="absolute inset-0 w-full h-full object-cover"
-                      style={{
-                        opacity: 1,
-                        transition: 'opacity 200ms ease-out',
-                      }}
-                      onError={(e) => {
-                        const el = e.currentTarget as HTMLImageElement;
-                        el.style.opacity = '0';
-                      }}
-                    />
-                    {/* 视频：默认透明（不遮盖海报），播放时才显示画面 */}
+                    {/* 海报图：OSS 截图；失败后自动重试；最终失败则隐藏，让 video 的 poster 兜底 */}
+                    {(() => {
+                      const posterUrl = getPosterUrl(video.url);
+                      if (!posterUrl) {
+                        // 非 OSS 视频：不显示 img，完全由 video poster 承担
+                        return null;
+                      }
+                      return (
+                        <img
+                          data-poster={video.id}
+                          src={posterUrl}
+                          alt={video.title}
+                          className="absolute inset-0 w-full h-full object-cover"
+                          style={{
+                            opacity: posterReadyRef.current.get(video.id) ? 1 : 1,
+                            transition: 'opacity 200ms ease-out',
+                          }}
+                          onLoad={(e) => {
+                            const el = e.currentTarget as HTMLImageElement;
+                            el.style.opacity = '1';
+                            posterReadyRef.current.set(video.id, true);
+                          }}
+                          onError={(e) => {
+                            const el = e.currentTarget as HTMLImageElement;
+                            const retries = posterRetryRef.current.get(video.id) || 0;
+                            if (retries < POSTER_MAX_RETRY) {
+                              // 还可以重试：通过追加随机参数重新请求
+                              posterRetryRef.current.set(video.id, retries + 1);
+                              const retryTimer = window.setTimeout(() => {
+                                el.src =
+                                  getPosterUrl(video.url) +
+                                  '&_retry=' +
+                                  Date.now();
+                              }, POSTER_RETRY_DELAY * (retries + 1));
+                              // 防止组件卸载后执行
+                              el.addEventListener(
+                                'load',
+                                () => window.clearTimeout(retryTimer),
+                                { once: true }
+                              );
+                            } else {
+                              // 全部重试失败：隐藏 img，video 的 poster 属性 / metadata 首帧兜底
+                              el.style.opacity = '0';
+                              posterReadyRef.current.set(video.id, true); // 不再等待
+                            }
+                          }}
+                        />
+                      );
+                    })()}
+                    {/* 视频：preload metadata 让浏览器拿到首帧作为兜底画面；用户点击后才真正播放 */}
                     <video
                       ref={(el) => registerVideoRef(video.id, el)}
                       data-video-id={video.id}
                       src={video.url}
+                      poster={getPosterUrl(video.url) || undefined}
                       loop
                       muted
                       playsInline
                       autoPlay={false}
-                      preload="none"
-                      onClick={(e) => handleVideoClick(e.currentTarget)}
+                      preload="metadata"
+                      onClick={(e) => handleVideoClick(e.currentTarget, video.id)}
                       onPlay={(e) => {
-                        // 播放：显示视频，隐藏海报
                         const v = e.currentTarget as HTMLVideoElement;
                         v.style.opacity = '1';
                         const parent = v.parentElement;
@@ -827,7 +960,6 @@ export function Video2Page() {
                         }
                       }}
                       onPause={(e) => {
-                        // 暂停：显示海报，隐藏视频
                         const v = e.currentTarget as HTMLVideoElement;
                         v.style.opacity = '0';
                         const parent = v.parentElement;
@@ -835,7 +967,9 @@ export function Video2Page() {
                           const poster = parent.querySelector(
                             `[data-poster="${video.id}"]`
                           ) as HTMLImageElement | null;
-                          if (poster) poster.style.opacity = '1';
+                          if (poster && getPosterUrl(video.url)) {
+                            poster.style.opacity = '1';
+                          }
                         }
                       }}
                       onEnded={(e) => {
@@ -846,7 +980,9 @@ export function Video2Page() {
                           const poster = parent.querySelector(
                             `[data-poster="${video.id}"]`
                           ) as HTMLImageElement | null;
-                          if (poster) poster.style.opacity = '1';
+                          if (poster && getPosterUrl(video.url)) {
+                            poster.style.opacity = '1';
+                          }
                         }
                       }}
                       className="absolute inset-0 w-full h-full object-contain cursor-pointer"
@@ -856,8 +992,27 @@ export function Video2Page() {
                         background: 'transparent',
                       }}
                     />
+                    {/* 居中播放按钮：微信中必须由用户点击触发播放 */}
+                    <div
+                      onClick={(e) => {
+                        const v = videoRefs.current.get(video.id);
+                        if (v) handleVideoClick(v, video.id);
+                      }}
+                      className="absolute inset-0 flex items-center justify-center z-20 cursor-pointer"
+                    >
+                      <div
+                        className={`w-14 h-14 md:w-16 md:h-16 rounded-full bg-gradient-to-br from-violet-500 to-fuchsia-500 shadow-lg shadow-fuchsia-500/40 flex items-center justify-center transition-transform hover:scale-105 ${
+                          USE_CLICK_TO_PLAY ? '' : 'opacity-90'
+                        }`}
+                      >
+                        <Play
+                          className="w-7 h-7 md:w-8 md:h-8 text-white ml-1"
+                          fill="white"
+                        />
+                      </div>
+                    </div>
                     <div className="absolute bottom-3 right-3 px-2.5 py-1 rounded-lg bg-black/60 backdrop-blur-sm text-xs text-white/80 pointer-events-none z-20">
-                      点击全屏播放
+                      {USE_CLICK_TO_PLAY ? '点击播放' : '点击全屏播放'}
                     </div>
                   </div>
 

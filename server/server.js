@@ -2557,6 +2557,31 @@ app.post('/api/video2/add', express.json({ limit: '1mb' }), async (req, res) => 
     const item = await db.video2Items.create({ title, filename, url, size, duration, status: 'pending' });
     console.log(`[video2] 新增视频: ${title}`);
     res.json({ success: true, data: item });
+
+    // 异步触发 OSS 截图缓存：不阻塞响应，后台执行。
+    // OSS 的视频处理是异步的，首次访问才会触发截图。
+    // 这里主动请求一次截图 URL，这样用户打开页面时就能直接命中缓存。
+    if (url && (url.includes('aliyuncs.com') || url.includes('qiziwenhua.top'))) {
+      const posterUrl = url + '?x-oss-process=video/snapshot,t_1000,f_jpg,w_800,m_fast';
+      // 延迟 500ms 再请求，确保 OSS 已完成视频文件写入
+      setTimeout(() => {
+        try {
+          fetch(posterUrl, { method: 'GET', signal: AbortSignal.timeout(15000) })
+            .then((r) => {
+              if (r.ok) {
+                console.log(`[video2] 截图预热成功: ${title}`);
+              } else {
+                console.log(`[video2] 截图预热 HTTP ${r.status}: ${title}（稍后自动重试）`);
+              }
+            })
+            .catch((e) => {
+              console.log(`[video2] 截图预热忽略: ${e.message}`);
+            });
+        } catch (e) {
+          console.log(`[video2] 截图预热启动忽略: ${e.message}`);
+        }
+      }, 500);
+    }
   } catch (error) {
     console.error('[video2] 新增视频失败:', error.message);
     res.status(500).json({ success: false, message: error.message });
