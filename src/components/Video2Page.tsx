@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Upload, Play, Check, Trash2, X, FileVideo, GripVertical } from 'lucide-react';
+import { Upload, Play, Check, Trash2, X, FileVideo, GripVertical, Maximize } from 'lucide-react';
 
 // ==================== 浏览器环境检测 ====================
 const UA = typeof navigator !== 'undefined' ? navigator.userAgent : '';
@@ -341,31 +341,53 @@ export function Video2Page() {
     }
   };
 
-  // 点击视频：暂停其他视频 → 播放当前 → 进入全屏
-  const handleVideoClick = (videoEl: HTMLVideoElement, videoId: number) => {
+  // 点击视频：切换播放/暂停（不再进入全屏）
+  const togglePlay = (videoEl: HTMLVideoElement, videoId: number) => {
     // 先暂停其他所有视频
     videoRefs.current.forEach((v, id) => {
       if (id !== videoId && !v.paused) v.pause();
     });
     nowPlayingIdRef.current = videoId;
 
-    // 播放当前视频（用户手势触发，微信中也能成功）
+    // 切换当前视频的播放/暂停状态
+    if (videoEl.paused) {
+      const playPromise = videoEl.play();
+      if (playPromise && typeof playPromise.catch === 'function') {
+        playPromise.catch(() => {});
+      }
+    } else {
+      videoEl.pause();
+    }
+  };
+
+  // 点击全屏按钮：进入全屏 + 解除静音 + 显示控件
+  const toggleFullscreen = (videoEl: HTMLVideoElement, videoId: number) => {
+    // 先暂停其他所有视频
+    videoRefs.current.forEach((v, id) => {
+      if (id !== videoId && !v.paused) v.pause();
+    });
+    nowPlayingIdRef.current = videoId;
+
+    // 确保视频在播放
     if (videoEl.paused) {
       const playPromise = videoEl.play();
       if (playPromise && typeof playPromise.catch === 'function') {
         playPromise.catch(() => {});
       }
     }
-    // iOS Safari 使用 webkitEnterFullscreen，其他浏览器使用标准 API
+
+    // 进入全屏：iOS 使用 webkitEnterFullscreen，其他浏览器使用标准 API
     const v = videoEl as any;
     if (typeof v.webkitEnterFullscreen === 'function') {
-      try { v.webkitEnterFullscreen(); return; } catch {}
+      try { v.webkitEnterFullscreen(); videoEl.muted = false; return; } catch {}
     }
     if (typeof v.webkitRequestFullscreen === 'function') {
-      try { v.webkitRequestFullscreen(); return; } catch {}
+      try { v.webkitRequestFullscreen(); videoEl.muted = false; videoEl.controls = true; return; } catch {}
     }
     if (typeof videoEl.requestFullscreen === 'function') {
       videoEl.requestFullscreen().catch(() => {});
+      videoEl.muted = false;
+      videoEl.controls = true;
     }
   };
 
@@ -887,58 +909,42 @@ export function Video2Page() {
                 >
                   {/* 视频播放区：海报图 + 播放按钮 + 视频元素 */}
                   <div className="relative bg-black aspect-video overflow-hidden">
-                    {/* 海报图：OSS 截图；失败后自动重试；最终失败则隐藏，让 video 的 poster 兜底 */}
-                    {(() => {
-                      const posterUrl = getPosterUrl(video.url);
-                      if (!posterUrl) {
-                        // 非 OSS 视频：不显示 img，完全由 video poster 承担
-                        return null;
-                      }
-                      return (
-                        <img
-                          data-poster={video.id}
-                          src={posterUrl}
-                          alt={video.title}
-                          className="absolute inset-0 w-full h-full object-cover"
-                          style={{
-                            opacity: posterReadyRef.current.get(video.id) ? 1 : 1,
-                            transition: 'opacity 200ms ease-out',
-                          }}
-                          onLoad={(e) => {
-                            const el = e.currentTarget as HTMLImageElement;
-                            el.style.opacity = '1';
-                            posterReadyRef.current.set(video.id, true);
-                          }}
-                          onError={(e) => {
-                            const el = e.currentTarget as HTMLImageElement;
-                            const retries = posterRetryRef.current.get(video.id) || 0;
-                            if (retries < POSTER_MAX_RETRY) {
-                              // 还可以重试：通过追加随机参数重新请求
-                              posterRetryRef.current.set(video.id, retries + 1);
-                              const retryTimer = window.setTimeout(() => {
-                                el.src =
-                                  getPosterUrl(video.url) +
-                                  '&_retry=' +
-                                  Date.now();
-                              }, POSTER_RETRY_DELAY * (retries + 1));
-                              // 防止组件卸载后执行
-                              el.addEventListener(
-                                'load',
-                                () => window.clearTimeout(retryTimer),
-                                { once: true }
-                              );
-                            } else {
-                              // 全部重试失败：隐藏 img，video 的 poster 属性 / metadata 首帧兜底
-                              el.style.opacity = '0';
-                              posterReadyRef.current.set(video.id, true); // 不再等待
-                            }
-                          }}
-                        />
-                      );
-                    })()}
-                    {/* 视频：preload metadata 让浏览器拿到首帧作为兜底画面；用户点击后才真正播放 */}
+                    {/* 视频：由 poster 属性显示海报，preload="none" 优化首屏加载
+                         在 onPlay 时显示视频画面，onPause 时隐藏
+                         全屏时解除静音 + 显示原生控件 */}
                     <video
-                      ref={(el) => registerVideoRef(video.id, el)}
+                      ref={(el) => {
+                        if (el) {
+                          videoRefs.current.set(video.id, el);
+                          if (ioRef.current) {
+                            ioRef.current.observe(el);
+                          }
+                          // 监听全屏事件：退出全屏时恢复静音+隐藏控件
+                          const onFsChange = () => {
+                            const fsEl =
+                              (document as any).fullscreenElement ||
+                              (document as any).webkitFullscreenElement ||
+                              (document as any).webkitCurrentFullScreenElement;
+                            if (!fsEl || fsEl !== el) {
+                              el.muted = true;
+                              el.controls = false;
+                            }
+                          };
+                          el.addEventListener('fullscreenchange', onFsChange);
+                          el.addEventListener('webkitfullscreenchange', onFsChange);
+                          el.addEventListener('webkitendfullscreen', onFsChange);
+                        } else {
+                          const oldEl = videoRefs.current.get(video.id);
+                          if (oldEl && ioRef.current) {
+                            ioRef.current.unobserve(oldEl);
+                          }
+                          videoRefs.current.delete(video.id);
+                          visibleVideosRef.current.delete(video.id);
+                          if (nowPlayingIdRef.current === video.id) {
+                            nowPlayingIdRef.current = null;
+                          }
+                        }
+                      }}
                       data-video-id={video.id}
                       src={video.url}
                       poster={getPosterUrl(video.url) || undefined}
@@ -946,43 +952,41 @@ export function Video2Page() {
                       muted
                       playsInline
                       autoPlay={false}
-                      preload="metadata"
-                      onClick={(e) => handleVideoClick(e.currentTarget, video.id)}
+                      preload="none"
+                      onClick={(e) => togglePlay(e.currentTarget, video.id)}
                       onPlay={(e) => {
                         const v = e.currentTarget as HTMLVideoElement;
                         v.style.opacity = '1';
-                        const parent = v.parentElement;
-                        if (parent) {
-                          const poster = parent.querySelector(
-                            `[data-poster="${video.id}"]`
-                          ) as HTMLImageElement | null;
-                          if (poster) poster.style.opacity = '0';
+                        // 隐藏播放按钮（保持全屏按钮可见）
+                        const playBtn = v.parentElement?.querySelector(
+                          `[data-play-button="${video.id}"]`
+                        ) as HTMLElement | null;
+                        if (playBtn) {
+                          playBtn.style.opacity = '0';
+                          playBtn.style.pointerEvents = 'none';
                         }
                       }}
                       onPause={(e) => {
                         const v = e.currentTarget as HTMLVideoElement;
                         v.style.opacity = '0';
-                        const parent = v.parentElement;
-                        if (parent) {
-                          const poster = parent.querySelector(
-                            `[data-poster="${video.id}"]`
-                          ) as HTMLImageElement | null;
-                          if (poster && getPosterUrl(video.url)) {
-                            poster.style.opacity = '1';
-                          }
+                        // 显示播放按钮
+                        const playBtn = v.parentElement?.querySelector(
+                          `[data-play-button="${video.id}"]`
+                        ) as HTMLElement | null;
+                        if (playBtn) {
+                          playBtn.style.opacity = '1';
+                          playBtn.style.pointerEvents = 'auto';
                         }
                       }}
                       onEnded={(e) => {
                         const v = e.currentTarget as HTMLVideoElement;
                         v.style.opacity = '0';
-                        const parent = v.parentElement;
-                        if (parent) {
-                          const poster = parent.querySelector(
-                            `[data-poster="${video.id}"]`
-                          ) as HTMLImageElement | null;
-                          if (poster && getPosterUrl(video.url)) {
-                            poster.style.opacity = '1';
-                          }
+                        const playBtn = v.parentElement?.querySelector(
+                          `[data-play-button="${video.id}"]`
+                        ) as HTMLElement | null;
+                        if (playBtn) {
+                          playBtn.style.opacity = '1';
+                          playBtn.style.pointerEvents = 'auto';
                         }
                       }}
                       className="absolute inset-0 w-full h-full object-contain cursor-pointer"
@@ -992,28 +996,41 @@ export function Video2Page() {
                         background: 'transparent',
                       }}
                     />
-                    {/* 居中播放按钮：微信中必须由用户点击触发播放 */}
+                    {/* 居中播放按钮：线性风格（半透明黑色底板 + 白色描边图标
+                         播放中隐藏（pointer-events-none + opacity-0） */}
                     <div
                       onClick={(e) => {
+                        e.stopPropagation();
                         const v = videoRefs.current.get(video.id);
-                        if (v) handleVideoClick(v, video.id);
+                        if (v) togglePlay(v, video.id);
                       }}
-                      className="absolute inset-0 flex items-center justify-center z-20 cursor-pointer"
+                      className="absolute inset-0 flex items-center justify-center z-20 cursor-pointer pointer-events-auto"
+                      data-play-button={video.id}
+                      style={{
+                        transition: 'opacity 200ms ease-out',
+                      }}
                     >
                       <div
-                        className={`w-14 h-14 md:w-16 md:h-16 rounded-full bg-gradient-to-br from-violet-500 to-fuchsia-500 shadow-lg shadow-fuchsia-500/40 flex items-center justify-center transition-transform hover:scale-105 ${
-                          USE_CLICK_TO_PLAY ? '' : 'opacity-90'
-                        }`}
-                      >
-                        <Play
-                          className="w-7 h-7 md:w-8 md:h-8 text-white ml-1"
-                          fill="white"
-                        />
-                      </div>
+                      className={`w-14 h-14 md:w-16 md:h-16 rounded-full bg-black/40 border border-white/40 backdrop-blur-sm flex items-center justify-center transition-transform hover:scale-105`}
+                    >
+                      <Play
+                        className="w-7 h-7 md:w-8 md:h-8 text-white ml-1"
+                        strokeWidth={1.5}
+                      />
                     </div>
-                    <div className="absolute bottom-3 right-3 px-2.5 py-1 rounded-lg bg-black/60 backdrop-blur-sm text-xs text-white/80 pointer-events-none z-20">
-                      {USE_CLICK_TO_PLAY ? '点击播放' : '点击全屏播放'}
                     </div>
+                    {/* 右下角全屏按钮 */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const v = videoRefs.current.get(video.id);
+                        if (v) toggleFullscreen(v, video.id);
+                      }}
+                      className="absolute bottom-3 right-3 w-9 h-9 rounded-full bg-black/60 border border-white/30 flex items-center justify-center text-white z-20 hover:bg-black/80 hover:scale-105 transition-all"
+                      title="全屏播放"
+                    >
+                      <Maximize className="w-4 h-4" strokeWidth={1.5} />
+                    </button>
                   </div>
 
                   {/* 底部信息栏 */}

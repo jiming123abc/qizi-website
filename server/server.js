@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const compression = require('compression');
 const OSS = require('ali-oss');
 const multer = require('multer');
 const path = require('path');
@@ -98,6 +99,7 @@ app.use((req, res, next) => {
   next();
 });
 
+app.use(compression());
 app.use(cors());
 
 // 统一请求日志中间件
