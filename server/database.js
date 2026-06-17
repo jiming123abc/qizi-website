@@ -682,38 +682,51 @@ const video2Db = new sqlite3.Database(video2DbPath, (err) => {
 });
 
 function initVideo2Database() {
-  video2Db.serialize(() => {
-    video2Db.run(`
-      CREATE TABLE IF NOT EXISTS videos (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        title TEXT NOT NULL,
-        filename TEXT NOT NULL,
-        url TEXT NOT NULL,
-        status TEXT NOT NULL DEFAULT 'pending',
-        size INTEGER,
-        duration REAL,
-        sortOrder INTEGER DEFAULT 0,
-        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-    // 对旧数据补 sortOrder（按创建顺序分配 0,1,2...）
-    video2Db.run('PRAGMA table_info(videos)', function(err, columns) {
-      if (err) return;
-      const colNames = columns.map(c => c.name);
+  video2Db.run(`
+    CREATE TABLE IF NOT EXISTS videos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      filename TEXT NOT NULL,
+      url TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      size INTEGER,
+      duration REAL,
+      sortOrder INTEGER DEFAULT 0,
+      createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  // 检查并补齐 sortOrder 列（对旧数据库升级）
+  video2Db.all('PRAGMA table_info(videos)', function(err, columns) {
+    if (err) {
+      console.error('[video2] PRAGMA table_info 失败:', err.message);
+      return;
+    }
+    if (!columns || columns.length === 0) {
+      // 新库刚创建，sortOrder 已包含在 CREATE TABLE 中，跳过
+      console.log('[video2] 新建数据库，跳过列升级');
+    } else {
+      const colNames = columns.map(function(c) { return c.name; });
       if (!colNames.includes('sortOrder')) {
+        console.log('[video2] 升级：新增 sortOrder 列并填充默认值');
         video2Db.run('ALTER TABLE videos ADD COLUMN sortOrder INTEGER DEFAULT 0');
-        video2Db.all('SELECT id FROM videos ORDER BY createdAt ASC, id ASC', function(err, rows) {
-          if (err) return;
-          rows.forEach((r, i) => {
+        video2Db.all('SELECT id FROM videos ORDER BY createdAt ASC, id ASC', function(err2, rows) {
+          if (err2) {
+            console.error('[video2] 查询视频列表失败:', err2.message);
+            return;
+          }
+          (rows || []).forEach(function(r, i) {
             video2Db.run('UPDATE videos SET sortOrder = ? WHERE id = ?', [i, r.id]);
           });
+          console.log('[video2] sortOrder 填充完成，共 ' + (rows ? rows.length : 0) + ' 条');
         });
       }
-    });
+    }
+    // 创建索引
     video2Db.run('CREATE INDEX IF NOT EXISTS idx_videos_status ON videos(status)');
-    video2Db.run('CREATE INDEX IF NOT EXISTS idx_videos_sort ON videos(sortOrder)');
-    console.log('[video2] 表结构已就绪');
+    video2Db.run('CREATE INDEX IF NOT EXISTS idx_videos_sort ON videos(sortOrder)', function() {
+      console.log('[video2] 表结构已就绪');
+    });
   });
 }
 
