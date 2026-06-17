@@ -713,25 +713,52 @@ export function Video2Page() {
                     video.status === 'done' ? 'opacity-90' : ''
                   }`}
                 >
-                  {/* 视频播放器 */}
-                  <div className="relative bg-black">
+                  {/* 视频播放器：背景图作海报 + 视频叠层 */}
+                  <div className="relative bg-black aspect-video">
+                    {/* 海报图：始终显示，视频播放后用 JS 隐藏 */}
+                    {video.url && video.url.includes('qiziwenhua.top') && (
+                      <img
+                        src={video.url + '?x-oss-process=video/snapshot,t_1000,f_jpg,w_800,m_fast'}
+                        alt={video.title}
+                        className="absolute inset-0 w-full h-full object-cover z-0 pointer-events-none transition-opacity duration-300"
+                        onError={(e) => {
+                          (e.currentTarget as HTMLImageElement).style.display = 'none';
+                        }}
+                        onLoad={(e) => {
+                          (e.currentTarget as HTMLImageElement).dataset.loaded = '1';
+                        }}
+                      />
+                    )}
+                    {/* 视频叠层 */}
                     <video
                       ref={(el) => registerVideoRef(video.id, el)}
                       src={video.url}
-                      poster={
-                        video.url && video.url.includes('qiziwenhua.top')
-                          ? video.url + '?x-oss-process=video/snapshot,t_1000,f_jpg,w_800,m_fast'
-                          : undefined
-                      }
                       loop
                       muted
                       playsInline
                       autoPlay={false}
-                      preload="auto"
+                      preload="metadata"
                       onClick={(e) => handleVideoClick(e.currentTarget)}
-                      className="w-full aspect-video object-contain cursor-pointer bg-black"
+                      onPlay={(e) => {
+                        // 视频开始播放时隐藏海报
+                        const parent = e.currentTarget.parentElement;
+                        if (parent) {
+                          const img = parent.querySelector('img');
+                          if (img) (img as HTMLImageElement).style.opacity = '0';
+                        }
+                      }}
+                      onPause={(e) => {
+                        // 视频暂停时显示海报
+                        const parent = e.currentTarget.parentElement;
+                        if (parent) {
+                          const img = parent.querySelector('img');
+                          if (img) (img as HTMLImageElement).style.opacity = '1';
+                        }
+                      }}
+                      className="absolute inset-0 w-full h-full object-contain cursor-pointer bg-transparent z-10"
+                      style={{ background: 'transparent' }}
                     />
-                    <div className="absolute bottom-3 right-3 px-2.5 py-1 rounded-lg bg-black/60 backdrop-blur-sm text-xs text-white/80 pointer-events-none">
+                    <div className="absolute bottom-3 right-3 px-2.5 py-1 rounded-lg bg-black/60 backdrop-blur-sm text-xs text-white/80 pointer-events-none z-20">
                       点击全屏播放
                     </div>
                   </div>
