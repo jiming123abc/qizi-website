@@ -83,49 +83,72 @@ export function Video2Page() {
     loadVideos();
   }, [loadVideos]);
 
-  // 滚动检测：居中视频自动播放
+  // 滚动检测：居中视频自动播放（不依赖 videos/currentTab，避免反复重建监听）
+  const nowPlayingIdRef = useRef<number | null>(null);
+
   useEffect(() => {
-    const handleScroll = () => {
+    const updatePlayingVideo = () => {
       if (rafPendingRef.current !== null) return;
       rafPendingRef.current = requestAnimationFrame(() => {
         rafPendingRef.current = null;
         const viewportCenter = window.innerHeight / 2;
-        let closestVideo: HTMLVideoElement | null = null;
+        let closestEl: HTMLVideoElement | null = null;
+        let closestId: number | null = null;
         let closestDistance = Infinity;
 
-        videoRefs.current.forEach((video) => {
+        videoRefs.current.forEach((video, id) => {
           const rect = video.getBoundingClientRect();
-          if (rect.height <= 0) return;
-          const videoCenter = rect.top + rect.height / 2;
-          const distance = Math.abs(videoCenter - viewportCenter);
+          if (rect.height <= 0 || rect.width <= 0) return;
+          if (rect.bottom < 0 || rect.top > window.innerHeight) return;
+          const center = rect.top + rect.height / 2;
+          const distance = Math.abs(center - viewportCenter);
           if (distance < closestDistance) {
             closestDistance = distance;
-            closestVideo = video;
+            closestEl = video;
+            closestId = id;
           }
         });
 
-        videoRefs.current.forEach((video) => {
-          if (video === closestVideo && closestDistance < 400) {
-            video.play().catch(() => {});
+        const THRESHOLD = Math.max(300, window.innerHeight * 0.4);
+        const shouldPlay = closestEl && closestDistance < THRESHOLD;
+        const targetId = shouldPlay ? closestId : null;
+
+        if (nowPlayingIdRef.current === targetId) return;
+
+        videoRefs.current.forEach((video, id) => {
+          if (id === targetId) {
+            if (video.paused) {
+              video.play().catch(() => {});
+            }
           } else {
-            video.pause();
+            if (!video.paused) {
+              video.pause();
+            }
           }
         });
+
+        nowPlayingIdRef.current = targetId;
       });
     };
 
-    window.addEventListener('scroll', handleScroll, { passive: true });
-    window.addEventListener('resize', handleScroll);
-    handleScroll();
+    const opts: AddEventListenerOptions = { passive: true };
+    window.addEventListener('scroll', updatePlayingVideo, opts);
+    window.addEventListener('resize', updatePlayingVideo, opts);
+    window.addEventListener('touchmove', updatePlayingVideo, opts);
+    window.addEventListener('touchend', updatePlayingVideo, opts);
+
+    updatePlayingVideo();
 
     return () => {
-      window.removeEventListener('scroll', handleScroll);
-      window.removeEventListener('resize', handleScroll);
+      window.removeEventListener('scroll', updatePlayingVideo, opts);
+      window.removeEventListener('resize', updatePlayingVideo, opts);
+      window.removeEventListener('touchmove', updatePlayingVideo, opts);
+      window.removeEventListener('touchend', updatePlayingVideo, opts);
       if (rafPendingRef.current !== null) {
         cancelAnimationFrame(rafPendingRef.current);
       }
     };
-  }, [currentTab, videos]);
+  }, []);
 
   // 上传视频
   const handleFileSelect = (files: FileList | null) => {
@@ -695,10 +718,16 @@ export function Video2Page() {
                     <video
                       ref={(el) => registerVideoRef(video.id, el)}
                       src={video.url}
+                      poster={
+                        video.url && video.url.includes('qiziwenhua.top')
+                          ? video.url + '?x-oss-process=video/snapshot,t_1000,f_jpg,w_800,m_fast'
+                          : undefined
+                      }
                       loop
                       muted
                       playsInline
-                      preload="metadata"
+                      autoPlay={false}
+                      preload="auto"
                       onClick={(e) => handleVideoClick(e.currentTarget)}
                       className="w-full aspect-video object-contain cursor-pointer bg-black"
                     />
