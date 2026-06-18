@@ -699,7 +699,7 @@ function video2DbSetReady() {
 
 function initVideo2Database() {
   video2Db.serialize(() => {
-    // 1. 创建 videos 表（完整新结构，包括所有新列）
+    // 1. 创建 videos 表（完整新结构，包括所有新列：type/coverUrl/isCover/reference）
     video2Db.run(`
       CREATE TABLE IF NOT EXISTS videos (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -714,6 +714,10 @@ function initVideo2Database() {
         deletedAt DATETIME,
         projectId INTEGER,
         sceneId INTEGER,
+        type TEXT DEFAULT 'video',
+        coverUrl TEXT,
+        isCover INTEGER DEFAULT 0,
+        reference INTEGER DEFAULT 0,
         createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
         updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
       )
@@ -754,7 +758,11 @@ function initVideo2Database() {
       'ALTER TABLE videos ADD COLUMN deleted INTEGER DEFAULT 0',
       'ALTER TABLE videos ADD COLUMN deletedAt DATETIME',
       'ALTER TABLE videos ADD COLUMN projectId INTEGER',
-      'ALTER TABLE videos ADD COLUMN sceneId INTEGER'
+      'ALTER TABLE videos ADD COLUMN sceneId INTEGER',
+      'ALTER TABLE videos ADD COLUMN type TEXT DEFAULT \'video\'',
+      'ALTER TABLE videos ADD COLUMN coverUrl TEXT',
+      'ALTER TABLE videos ADD COLUMN isCover INTEGER DEFAULT 0',
+      'ALTER TABLE videos ADD COLUMN reference INTEGER DEFAULT 0'
     ];
     addColSqlList.forEach(function(sql) {
       video2Db.run(sql, function(err) {
@@ -1007,13 +1015,15 @@ const video2Items = {
       'SELECT * FROM videos WHERE deleted = 0 ORDER BY sortOrder ASC, id ASC'
     );
   },
-  getByFilter: async ({ projectId, sceneId, status, deleted }) => {
+  getByFilter: async ({ projectId, sceneId, status, deleted, type, reference }) => {
     let sql = 'SELECT * FROM videos WHERE 1=1';
     const params = [];
     if (projectId !== undefined) { sql += ' AND projectId = ?'; params.push(projectId); }
     if (sceneId !== undefined) { sql += sceneId === null ? ' AND sceneId IS NULL' : ' AND sceneId = ?'; if (sceneId !== null) params.push(sceneId); }
     if (status !== undefined) { sql += ' AND status = ?'; params.push(status); }
     if (deleted !== undefined) { sql += ' AND deleted = ?'; params.push(deleted); }
+    if (type !== undefined) { sql += ' AND type = ?'; params.push(type); }
+    if (reference !== undefined) { sql += ' AND reference = ?'; params.push(reference); }
     sql += ' ORDER BY sortOrder ASC, id ASC';
     return await video2Async.all(sql, params);
   },
@@ -1044,11 +1054,11 @@ const video2Items = {
   },
   create: async (item) => {
     const maxRow = await video2Async.get(
-      'SELECT MAX(sortOrder) as maxSort FROM videos WHERE deleted = 0'
+      'SELECT MAX(sortOrder) as maxSort FROM videos WHERE deleted = 0 AND (reference IS NULL OR reference = 0)'
     );
     const nextSort = ((maxRow && maxRow.maxSort != null) ? maxRow.maxSort : -1) + 1;
     const result = await video2Async.run(
-      'INSERT INTO videos (title, filename, url, status, size, duration, sortOrder, projectId, sceneId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO videos (title, filename, url, status, size, duration, sortOrder, projectId, sceneId, type, coverUrl, reference) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       [
         item.title,
         item.filename,
@@ -1056,9 +1066,12 @@ const video2Items = {
         item.status || 'pending',
         item.size || null,
         item.duration || null,
-        nextSort,
+        item.sortOrder !== undefined ? item.sortOrder : nextSort,
         item.projectId !== undefined ? item.projectId : null,
-        item.sceneId !== undefined ? item.sceneId : null
+        item.sceneId !== undefined ? item.sceneId : null,
+        item.type || 'video',
+        item.coverUrl || null,
+        item.reference || 0
       ]
     );
     return { id: result.lastID, sortOrder: nextSort, ...item };
@@ -1151,6 +1164,17 @@ const video2Items = {
   delete: async (id) => {
     const result = await video2Async.run('DELETE FROM videos WHERE id = ?', [id]);
     return result.changes > 0;
+  },
+  // 原子设置封面：先清除同项目的旧 isCover=1，再设置当前记录
+  setCover: async (projectId, videoId) => {
+    await video2Async.run('UPDATE videos SET isCover = 0, updatedAt = CURRENT_TIMESTAMP WHERE projectId = ? AND isCover = 1', [projectId]);
+    const r = await video2Async.run('UPDATE videos SET isCover = 1, updatedAt = CURRENT_TIMESTAMP WHERE id = ?', [videoId]);
+    return r.changes > 0;
+  },
+  // 取消某条视频的封面标记
+  unsetCover: async (videoId) => {
+    const r = await video2Async.run('UPDATE videos SET isCover = 0, updatedAt = CURRENT_TIMESTAMP WHERE id = ?', [videoId]);
+    return r.changes > 0;
   }
 };
 

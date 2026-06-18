@@ -1,27 +1,19 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Upload, Play, Check, Trash2, X, FileVideo, GripVertical, Maximize, Share2, Plus, ArrowLeft, RotateCcw } from 'lucide-react';
-import { setupShareMetadata, copyToClipboard } from '../lib/shareUtils';
+import { Upload, Play, CheckCircle2, Trash2, X, FileVideo, Maximize2, Share2, Plus, ArrowLeft, RotateCcw, Image as ImageIcon, Link2, GripVertical } from 'lucide-react';
+import { setupShareMetadata, copyToClipboard, isWeChat as checkIsWeChat } from '../lib/shareUtils';
+import { uploadVideo2Image, uploadVideo2Video, uploadVideo2FromUrl, detectFileType } from '../lib/ossUtils';
+import { ShareHint } from './WeChatShareHint';
 
-// ==================== 浏览器环境检测 ====================
-const UA = typeof navigator !== 'undefined' ? navigator.userAgent : '';
-const isWeChat = /MicroMessenger/i.test(UA);
-const USE_CLICK_TO_PLAY = isWeChat;
-
-// ==================== OSS 封面截图 URL ====================
-function getPosterUrl(videoUrl: string): string {
-  if (videoUrl.includes('qiziwenhua.top') || videoUrl.includes('aliyuncs.com')) {
-    return videoUrl + '?x-oss-process=video/snapshot,t_1000,f_jpg,w_800,m_fast';
-  }
-  return '';
+interface Video2PageProps {
+  projectId: number;
 }
-const POSTER_MAX_RETRY = 3;
-const POSTER_RETRY_DELAY = 1500;
 
-interface VideoItem {
+interface MediaItem {
   id: number;
   title: string;
   filename: string;
   url: string;
+  type: 'image' | 'video';
   status: 'pending' | 'done';
   size: number;
   duration?: number;
@@ -57,16 +49,11 @@ interface UploadingFile {
   size: number;
   progress: number;
   status: 'uploading' | 'done' | 'error';
-  errorMsg?: string;
+  message?: string;
 }
 
-const formatSize = (bytes: number): string => {
-  if (!bytes || bytes < 1024) return bytes + ' B';
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-  return (bytes / 1024 / 1024).toFixed(1) + ' MB';
-};
-
 function timeAgo(dateStr: string): string {
+  if (!dateStr) return '';
   const diff = Date.now() - new Date(dateStr).getTime();
   const days = Math.floor(diff / 86400000);
   if (days === 0) return '今天';
@@ -75,854 +62,1026 @@ function timeAgo(dateStr: string): string {
   return `${Math.floor(days / 7)} 周前`;
 }
 
-// debounce helper
-function debounce<T extends (...args: unknown[]) => void>(fn: T, ms: number): T {
-  let timer: ReturnType<typeof setTimeout>;
-  return ((...args: unknown[]) => {
-    clearTimeout(timer);
-    timer = setTimeout(() => fn(...args), ms);
-  }) as T;
-}
-
-interface Video2PageProps {
-  projectId: number;
+function getPosterUrl(videoUrl: string): string {
+  if (videoUrl.includes('qiziwenhua.top') || videoUrl.includes('aliyuncs.com')) {
+    return videoUrl + '?x-oss-process=video/snapshot,t_1000,f_jpg,w_800,m_fast';
+  }
+  return '';
 }
 
 export function Video2Page({ projectId }: Video2PageProps) {
+  // 项目基础信息
   const [project, setProject] = useState<Project | null>(null);
   const [scenes, setScenes] = useState<Scene[]>([]);
-  const [videos, setVideos] = useState<VideoItem[]>([]);
+  const [items, setItems] = useState<MediaItem[]>([]);
+  const [stats, setStats] = useState<{ pending: number; done: number; trash: number }>({ pending: 0, done: 0, trash: 0 });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // UI 状态
   const [currentSceneId, setCurrentSceneId] = useState<number | null>(null); // null = 未分类
   const [currentTab, setCurrentTab] = useState<'pending' | 'done' | 'trash'>('pending');
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
-  const [stats, setStats] = useState({ pending: 0, done: 0, trash: 0, total: 0 });
-  const [loading, setLoading] = useState(true);
-  const [uploadingFiles, setUploadingFiles] = useState<UploadingFile[]>([]);
-  const [isUploadOpen, setIsUploadOpen] = useState(false);
-  const [isDragOver, setIsDragOver] = useState(false);
-  const [isSavingSort, setIsSavingSort] = useState(false);
-  const [draggingId, setDraggingId] = useState<number | null>(null);
-  const [dragOverId, setDragOverId] = useState<number | null>(null);
-  const [editingTitleId, setEditingTitleId] = useState<number | null>(null);
-  const [editingTitleText, setEditingTitleText] = useState('');
-  const [showSceneMenu, setShowSceneMenu] = useState<number | null>(null); // sceneId
+
+  // 弹窗
   const [showNewSceneModal, setShowNewSceneModal] = useState(false);
   const [newSceneName, setNewSceneName] = useState('');
   const [showMoveModal, setShowMoveModal] = useState(false);
+  const [showRenameSceneId, setShowRenameSceneId] = useState<number | null>(null);
+  const [renameSceneName, setRenameSceneName] = useState('');
+  const [showUploadDialog, setShowUploadDialog] = useState(false);
+  const [uploadTab, setUploadTab] = useState<'file' | 'url'>('file');
+  const [uploadingFiles, setUploadingFiles] = useState<UploadingFile[]>([]);
+  const [urlInputValue, setUrlInputValue] = useState('');
+
+  // 分享
+  const [shareHintVisible, setShareHintVisible] = useState(false);
+  const [shareHintMode, setShareHintMode] = useState<'wechat' | 'default'>('default');
+
+  // 通知 toast
   const [toast, setToast] = useState<string | null>(null);
-  const [showDeleteProjectConfirm, setShowDeleteProjectConfirm] = useState(false);
-
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const videoRefs = useRef<Map<number, HTMLVideoElement>>(new Map());
-  const posterRetryRef = useRef<Map<number, number>>(new Map());
-  const posterReadyRef = useRef<Map<number, boolean>>(new Map());
-  const nowPlayingIdRef = useRef<number | null>(null);
-  const playLockRef = useRef<boolean>(false);
-  const visibleVideosRef = useRef<Map<number, number>>(new Map());
-  const ioRef = useRef<IntersectionObserver | null>(null);
-  const saveSortDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   const showToast = useCallback((msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(null), 2500);
   }, []);
 
-  // 加载项目信息
+  // 滚动位置记忆
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const lastScrollPosition = useRef<number>(0);
+
+  // 全屏
+  const [fullscreenItem, setFullscreenItem] = useState<MediaItem | null>(null);
+
+  // ============ 数据加载 ============
   const loadProject = useCallback(async () => {
     try {
-      const res = await fetch('/api/video2/projects');
+      const res = await fetch(`/api/video2/projects/${projectId}`);
       const data = await res.json();
-      if (data.success) {
-        const p = data.data.find((x: Project) => x.id === projectId);
-        if (p) setProject(p);
-      }
-    } catch (e) { console.error('加载项目失败:', e); }
+      if (data.success) setProject(data.data);
+    } catch (e) {
+      console.error('加载项目信息失败:', e);
+    }
   }, [projectId]);
 
-  // 加载场次列表
   const loadScenes = useCallback(async () => {
     try {
       const res = await fetch(`/api/video2/projects/${projectId}/scenes`);
       const data = await res.json();
-      if (data.success) setScenes(data.data);
-    } catch (e) { console.error('加载场次失败:', e); }
+      if (data.success) setScenes(data.data || []);
+    } catch (e) {
+      console.error('加载场次失败:', e);
+    }
   }, [projectId]);
 
-  // 加载视频列表 + 统计
-  const loadVideos = useCallback(async () => {
+  const loadItems = useCallback(async () => {
     try {
-      const params = new URLSearchParams({ projectId: String(projectId) });
+      const params = new URLSearchParams();
+      params.set('projectId', String(projectId));
       if (currentSceneId !== null) params.set('sceneId', String(currentSceneId));
       if (currentTab === 'trash') params.set('deleted', '1');
-      else params.set('deleted', '0');
-      if (currentTab !== 'trash') params.set('status', currentTab);
-
-      const [listRes, statsRes] = await Promise.all([
-        fetch(`/api/video2/list?${params.toString()}`),
-        fetch(`/api/video2/stats?projectId=${projectId}`)
-      ]);
-      const [listData, statsData] = await Promise.all([listRes.json(), statsRes.json()]);
-      if (listData.success) setVideos(listData.data);
-      if (statsData.success) setStats(statsData.data);
-    } catch (e) { console.error('加载视频失败:', e); }
-    finally { setLoading(false); }
+      else params.set('status', currentTab);
+      const res = await fetch(`/api/video2/list?${params.toString()}`);
+      const data = await res.json();
+      if (data.success) setItems(data.data || []);
+    } catch (e) {
+      console.error('加载列表失败:', e);
+    }
   }, [projectId, currentSceneId, currentTab]);
 
-  useEffect(() => { setLoading(true); setSelectedIds(new Set()); }, [currentSceneId, currentTab]);
-  useEffect(() => { loadProject(); loadScenes(); }, [loadProject, loadScenes]);
-  useEffect(() => { loadVideos(); }, [loadVideos]);
-
-  // 页面标题设置
-  useEffect(() => {
-    if (project) {
-      document.title = project.name;
-      setupShareMetadata({
-        title: project.name,
-        desc: project.description || '柒子文化拍摄辅助 · 项目分享',
-        link: project.shareUrl,
-        imgUrl: project.coverUrl || '/images/hero-home.png'
-      });
+  const loadStats = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/video2/stats?projectId=${projectId}`);
+      const data = await res.json();
+      if (data.success) {
+        setStats({ pending: data.pending || 0, done: data.done || 0, trash: data.trash || 0 });
+      }
+    } catch (e) {
+      console.error('加载统计失败:', e);
     }
+  }, [projectId]);
+
+  // 初始化
+  useEffect(() => {
+    setLoading(true);
+    Promise.all([loadProject(), loadScenes(), loadItems(), loadStats()])
+      .then(() => setLoading(false))
+      .catch(() => setLoading(false));
+  }, [loadProject, loadScenes, loadItems, loadStats]);
+
+  // SEO / 分享元数据
+  useEffect(() => {
+    if (!project) return;
+    document.title = project.name + ' · 柒子文化拍摄辅助';
+    setupShareMetadata({
+      title: project.name,
+      desc: project.description || '柒子文化拍摄辅助 - 专业项目管理',
+      link: window.location.href,
+      imgUrl: project.coverUrl || ''
+    });
   }, [project]);
 
-  // 滚动位置记忆
-  const saveScrollPosition = useCallback(
-    debounce((sceneId: number | null) => {
-      if (sceneId === null) return;
-      fetch(`/api/video2/scenes/${sceneId}`, {
+  // 切换场次 / tab 后，重新加载数据
+  useEffect(() => {
+    loadItems();
+    loadStats();
+  }, [currentSceneId, currentTab, loadItems, loadStats]);
+
+  // ============ 标题编辑 ============
+  const updateTitle = async (id: number, title: string) => {
+    try {
+      await fetch(`/api/video2/videos/${id}/title`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scrollPosition: window.scrollY })
-      }).catch(() => {});
-    }, 300),
-    []
-  );
-
-  // 恢复滚动位置
-  useEffect(() => {
-    if (!loading && currentSceneId !== null) {
-      const scene = scenes.find(s => s.id === currentSceneId);
-      if (scene?.scrollPosition) {
-        window.scrollTo(0, scene.scrollPosition);
-      }
-    }
-  }, [loading, currentSceneId, scenes]);
-
-  // IntersectionObserver + 滚动自动播放
-  const updatePlayingFromVisible = useCallback(() => {
-    if (playLockRef.current) return;
-    playLockRef.current = true;
-    setTimeout(() => { playLockRef.current = false; }, 50);
-
-    if (visibleVideosRef.current.size === 0) {
-      videoRefs.current.forEach(v => { if (!v.paused) v.pause(); v.preload = 'none'; });
-      nowPlayingIdRef.current = null;
-      return;
-    }
-    let bestId: number | null = null, bestRatio = 0;
-    visibleVideosRef.current.forEach((ratio, id) => { if (ratio > bestRatio) { bestRatio = ratio; bestId = id; } });
-
-    if (bestId !== null) {
-      const tv = videoRefs.current.get(bestId);
-      if (tv) {
-        const rect = tv.getBoundingClientRect();
-        const center = rect.top + rect.height / 2;
-        const dist = Math.abs(center - window.innerHeight / 2) / window.innerHeight;
-        if (dist > 0.35) bestId = null;
-      } else bestId = null;
-    }
-
-    videoRefs.current.forEach((video, id) => {
-      if (id !== bestId) {
-        if (!video.paused) video.pause();
-        const ratio = visibleVideosRef.current.get(id);
-        if (ratio === undefined || ratio < 0.3) video.preload = 'none';
-        return;
-      }
-      video.preload = 'auto';
-      if (USE_CLICK_TO_PLAY) return;
-      if (video.paused) video.play().catch(() => {});
-    });
-    nowPlayingIdRef.current = bestId;
-  }, []);
-
-  // 注册/注销 video element
-  const registerVideoRef = useCallback((id: number, el: HTMLVideoElement | null) => {
-    if (el) {
-      videoRefs.current.set(id, el);
-      if (ioRef.current) ioRef.current.observe(el);
-    } else {
-      const old = videoRefs.current.get(id);
-      if (old && ioRef.current) ioRef.current.unobserve(old);
-      videoRefs.current.delete(id);
-      visibleVideosRef.current.delete(id);
-      if (nowPlayingIdRef.current === id) nowPlayingIdRef.current = null;
-    }
-  }, []);
-
-  useEffect(() => {
-    const supportsIO = typeof window !== 'undefined' && 'IntersectionObserver' in window;
-    const updateFromRects = () => {
-      let changed = false;
-      videoRefs.current.forEach((el, id) => {
-        const rect = el.getBoundingClientRect();
-        const vh = window.innerHeight, vw = window.innerWidth;
-        if (rect.bottom <= 0 || rect.top >= vh || rect.right <= 0 || rect.left >= vw) {
-          if (visibleVideosRef.current.has(id)) { visibleVideosRef.current.delete(id); changed = true; }
-          return;
-        }
-        const visH = Math.min(rect.bottom, vh) - Math.max(rect.top, 0);
-        const visW = Math.min(rect.right, vw) - Math.max(rect.left, 0);
-        const ratio = (rect.width * rect.height) > 0 ? (visH * visW) / (rect.width * rect.height) : 0;
-        if (ratio >= 0.6) { if (visibleVideosRef.current.get(id) !== ratio) { visibleVideosRef.current.set(id, ratio); changed = true; } }
-        else { if (visibleVideosRef.current.has(id)) { visibleVideosRef.current.delete(id); changed = true; } }
+        body: JSON.stringify({ title })
       });
-      if (changed) updatePlayingFromVisible();
-    };
-    if (supportsIO) {
-      ioRef.current = new IntersectionObserver((entries) => {
-        let changed = false;
-        entries.forEach(entry => {
-          const el = entry.target as HTMLVideoElement;
-          const id = Number(el.getAttribute('data-video-id'));
-          if (!id || isNaN(id)) return;
-          if (entry.intersectionRatio >= 0.6) { visibleVideosRef.current.set(id, entry.intersectionRatio); changed = true; }
-          else { if (visibleVideosRef.current.has(id)) { visibleVideosRef.current.delete(id); changed = true; } }
-        });
-        if (changed) updatePlayingFromVisible();
-      }, { threshold: [0.25, 0.4, 0.5, 0.6, 0.75, 0.9] });
-      videoRefs.current.forEach(el => { if (ioRef.current) ioRef.current.observe(el); });
+      setItems(prev => prev.map(it => it.id === id ? { ...it, title } : it));
+    } catch (e) {
+      console.error('更新标题失败:', e);
     }
-    let rafId: number | null = null;
-    const onScroll = () => {
-      if (rafId !== null) return;
-      rafId = window.requestAnimationFrame(() => { rafId = null; updateFromRects(); });
-    };
-    window.addEventListener('scroll', onScroll, { passive: true });
-    const t1 = setTimeout(() => updateFromRects(), 300);
-    const t2 = setTimeout(() => updateFromRects(), 1200);
-    return () => {
-      clearTimeout(t1); clearTimeout(t2);
-      window.removeEventListener('scroll', onScroll);
-      if (rafId !== null) window.cancelAnimationFrame(rafId);
-      if (ioRef.current) ioRef.current.disconnect();
-    };
-  }, [updatePlayingFromVisible]);
-
-  // 切换播放/暂停
-  const togglePlay = (videoEl: HTMLVideoElement, videoId: number) => {
-    videoRefs.current.forEach((v, id) => { if (id !== videoId && !v.paused) v.pause(); });
-    nowPlayingIdRef.current = videoId;
-    if (videoEl.paused) videoEl.play().catch(() => {});
-    else videoEl.pause();
   };
 
-  // 全屏播放
-  const toggleFullscreen = (videoEl: HTMLVideoElement, videoId: number) => {
-    videoRefs.current.forEach((v, id) => { if (id !== videoId && !v.paused) v.pause(); });
-    nowPlayingIdRef.current = videoId;
-    videoEl.muted = false; videoEl.controls = true;
-    const v = videoEl as any;
-    const enterFs = () => {
-      if (v.webkitEnterFullscreen) try { v.webkitEnterFullscreen(); } catch (e) {}
-      else if (v.webkitRequestFullscreen) try { v.webkitRequestFullscreen(); } catch (e) {}
-      else if (videoEl.requestFullscreen) videoEl.requestFullscreen().catch(() => {});
-    };
-    if (!videoEl.paused) { enterFs(); return; }
-    videoEl.play().then(() => enterFs()).catch(() => enterFs());
-  };
-
-  // 上传视频
-  const handleFileSelect = (files: FileList | null) => {
-    if (!files) return;
-    Array.from(files).forEach(f => { if (f.type.startsWith('video/')) uploadSingleFile(f); });
-  };
-
-  const uploadSingleFile = async (file: File) => {
-    const uploadId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const uploadingFile: UploadingFile = { id: uploadId, name: file.name, size: file.size, progress: 0, status: 'uploading' };
-    setUploadingFiles(prev => [uploadingFile, ...prev]);
+  // ============ 状态切换 ============
+  const toggleStatus = async (item: MediaItem) => {
+    const newStatus = item.status === 'pending' ? 'done' : 'pending';
     try {
-      const presignRes = await fetch('/api/oss/presign', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ folder: 'video2', filename: file.name, contentType: file.type || 'video/mp4' })
-      });
-      const presignData = await presignRes.json();
-      if (!presignData.signedUrl || !presignData.publicUrl) throw new Error('获取上传凭证失败');
-      const { signedUrl, publicUrl, key } = presignData;
-      await new Promise<void>((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open('PUT', signedUrl);
-        xhr.setRequestHeader('Content-Type', file.type || 'video/mp4');
-        xhr.timeout = 30 * 60 * 1000;
-        xhr.upload.addEventListener('progress', e => {
-          if (e.lengthComputable) setUploadingFiles(prev => prev.map(f => f.id === uploadId ? { ...f, progress: Math.round(e.loaded / e.total * 95) } : f));
-        });
-        xhr.addEventListener('load', () => (xhr.status >= 200 && xhr.status < 300) ? resolve() : reject(new Error(`HTTP ${xhr.status}`)));
-        xhr.addEventListener('error', () => reject(new Error('网络错误')));
-        xhr.addEventListener('timeout', () => reject(new Error('上传超时')));
-        xhr.send(file);
-      });
-      setUploadingFiles(prev => prev.map(f => f.id === uploadId ? { ...f, progress: 98 } : f));
-      const addRes = await fetch('/api/video2/add', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: file.name.replace(/\.[^/.]+$/, ''),
-          filename: key || file.name, url: publicUrl, size: file.size,
-          projectId, sceneId: currentSceneId
-        })
-      });
-      const addData = await addRes.json();
-      if (!addData.success) throw new Error(addData.message);
-      setUploadingFiles(prev => prev.map(f => f.id === uploadId ? { ...f, progress: 100, status: 'done' } : f));
-      setTimeout(() => { setUploadingFiles(prev => prev.filter(f => f.id !== uploadId)); loadVideos(); }, 800);
-    } catch (err) {
-      setUploadingFiles(prev => prev.map(f => f.id === uploadId ? { ...f, status: 'error', errorMsg: err instanceof Error ? err.message : '未知错误' } : f));
-    }
-  };
-
-  // 切换视频状态
-  const toggleVideoStatus = async (video: VideoItem) => {
-    const newStatus = video.status === 'pending' ? 'done' : 'pending';
-    try {
-      const res = await fetch(`/api/video2/${video.id}/status`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      await fetch(`/api/video2/videos/${item.id}/status`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: newStatus })
       });
-      const data = await res.json();
-      if (data.success) {
-        setVideos(prev => prev.map(v => v.id === video.id ? { ...v, status: newStatus } : v));
-        loadVideos(); // 刷新列表和统计
-      }
-    } catch (e) { console.error('更新状态失败:', e); }
+      setItems(prev => prev.map(it => it.id === item.id ? { ...it, status: newStatus } : it));
+      loadStats();
+    } catch (e) {
+      console.error('更新状态失败:', e);
+    }
   };
 
-  // 软删除视频
-  const softDeleteVideo = async (videoId: number) => {
+  // ============ 删除 / 恢复 / 彻底删除 ============
+  const softDelete = async (id: number) => {
     try {
-      const res = await fetch(`/api/video2/${videoId}`, { method: 'DELETE' });
-      const data = await res.json();
-      if (data.success) { setVideos(prev => prev.filter(v => v.id !== videoId)); loadVideos(); showToast('已移入垃圾桶'); }
-    } catch (e) { console.error('删除失败:', e); }
+      await fetch(`/api/video2/videos/${id}`, { method: 'DELETE' });
+      setItems(prev => prev.filter(it => it.id !== id));
+      loadStats();
+      showToast('已移到垃圾桶');
+    } catch (e) {
+      console.error('删除失败:', e);
+    }
   };
 
-  // 恢复视频
-  const restoreVideo = async (videoId: number) => {
+  const restoreItem = async (id: number) => {
     try {
-      const res = await fetch(`/api/video2/videos/${videoId}/restore`, { method: 'POST' });
-      const data = await res.json();
-      if (data.success) { setVideos(prev => prev.filter(v => v.id !== videoId)); loadVideos(); showToast('已恢复'); }
-    } catch (e) { console.error('恢复失败:', e); }
+      await fetch(`/api/video2/videos/${id}/restore`, { method: 'POST' });
+      setItems(prev => prev.filter(it => it.id !== id));
+      loadStats();
+      showToast('已恢复');
+    } catch (e) {
+      console.error('恢复失败:', e);
+    }
   };
 
-  // 彻底删除视频
-  const hardDeleteVideo = async (videoId: number) => {
-    if (!confirm('彻底删除后无法恢复，确定吗？')) return;
+  const hardDelete = async (id: number) => {
+    if (!confirm('确定彻底删除此素材吗？无法恢复。')) return;
     try {
-      const res = await fetch(`/api/video2/videos/${videoId}/hard`, { method: 'DELETE' });
-      const data = await res.json();
-      if (data.success) { setVideos(prev => prev.filter(v => v.id !== videoId)); loadVideos(); showToast('已彻底删除'); }
-    } catch (e) { console.error('彻底删除失败:', e); }
+      await fetch(`/api/video2/videos/${id}/hard`, { method: 'DELETE' });
+      setItems(prev => prev.filter(it => it.id !== id));
+      loadStats();
+      showToast('已彻底删除');
+    } catch (e) {
+      console.error('彻底删除失败:', e);
+    }
   };
 
-  // 修改标题
-  const saveTitle = async (videoId: number) => {
-    const text = editingTitleText.trim();
-    if (!text) { setEditingTitleId(null); return; }
-    try {
-      const res = await fetch(`/api/video2/videos/${videoId}/title`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: text })
-      });
-      const data = await res.json();
-      if (data.success) {
-        setVideos(prev => prev.map(v => v.id === videoId ? { ...v, title: text } : v));
-        showToast('标题已保存');
-      }
-    } catch (e) { console.error('保存标题失败:', e); }
-    setEditingTitleId(null);
-  };
-
-  // 批量操作
-  const handleBatchOp = async (op: 'softDelete' | 'restore' | 'hardDelete' | 'changeScene', sceneId?: number | null) => {
-    if (selectedIds.size === 0) return;
-    if (op === 'hardDelete' && !confirm(`彻底删除 ${selectedIds.size} 个视频，无法恢复！`)) return;
-    try {
-      const res = await fetch('/api/video2/videos/batch-update', {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ videoIds: Array.from(selectedIds), operation: op, sceneId: op === 'changeScene' ? (sceneId ?? null) : undefined })
-      });
-      const data = await res.json();
-      if (data.success) {
-        if (op === 'softDelete') showToast(`已删除 ${data.changes} 个视频到垃圾桶`);
-        else if (op === 'restore') showToast(`已恢复 ${data.changes} 个视频`);
-        else if (op === 'hardDelete') showToast(`已彻底删除 ${data.changes} 个视频`);
-        else if (op === 'changeScene') showToast(`已移动 ${data.changes} 个视频`);
-        setSelectedIds(new Set());
-        setShowMoveModal(false);
-        loadVideos();
-      }
-    } catch (e) { console.error('批量操作失败:', e); }
-  };
-
-  // 拖拽排序
-  const scheduleSaveSort = useCallback((newVideos: VideoItem[]) => {
-    if (saveSortDebounceRef.current) clearTimeout(saveSortDebounceRef.current);
-    saveSortDebounceRef.current = setTimeout(async () => {
-      setIsSavingSort(true);
-      try {
-        const orders = newVideos.map((v, idx) => ({ id: v.id, sortOrder: idx }));
-        await fetch('/api/video2/sort', {
-          method: 'PUT', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ orders })
-        });
-      } finally { setIsSavingSort(false); }
-    }, 400);
-  }, []);
-
-  const moveVideo = useCallback((fromId: number, toId: number) => {
-    setVideos(prev => {
-      const filtered = prev.filter(v => v.status === (currentTab === 'trash' ? 'pending' : currentTab));
-      const fromIdx = filtered.findIndex(v => v.id === fromId);
-      let toIdx = filtered.findIndex(v => v.id === toId);
-      if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return prev;
-      const nextF = [...filtered]; const [moved] = nextF.splice(fromIdx, 1); nextF.splice(toIdx, 0, moved);
-      const nextAll = [...prev]; let fIdx = 0;
-      for (let i = 0; i < nextAll.length; i++) {
-        if (nextAll[i].status === (currentTab === 'trash' ? 'pending' : currentTab)) nextAll[i] = nextF[fIdx++];
-      }
-      scheduleSaveSort(nextAll);
-      return nextAll;
-    });
-  }, [currentTab, scheduleSaveSort]);
-
-  const onCardDragStart = (e: React.DragEvent<HTMLDivElement>, id: number) => { setDraggingId(id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(id)); };
-  const onCardDragOver = (e: React.DragEvent<HTMLDivElement>, id: number) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dragOverId !== id) setDragOverId(id); };
-  const onCardDrop = (e: React.DragEvent<HTMLDivElement>, targetId: number) => { e.preventDefault(); e.stopPropagation(); setDraggingId(null); setDragOverId(null); const src = parseInt(e.dataTransfer.getData('text/plain')); if (src && src !== targetId) moveVideo(src, targetId); };
-  const onCardDragEnd = () => { setDraggingId(null); setDragOverId(null); };
-
-  const handleSceneChange = (sceneId: number | null) => {
-    if (currentSceneId !== null && currentSceneId !== sceneId) saveScrollPosition(currentSceneId);
-    setCurrentSceneId(sceneId);
-    setSelectedIds(new Set());
-  };
-
-  const createScene = async () => {
-    if (!newSceneName.trim()) return;
-    try {
-      const res = await fetch(`/api/video2/projects/${projectId}/scenes`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newSceneName.trim() })
-      });
-      const data = await res.json();
-      if (data.success) { setScenes(prev => [...prev, data.data]); setShowNewSceneModal(false); setNewSceneName(''); showToast('场次创建成功'); }
-    } catch (e) { console.error('创建场次失败:', e); }
-  };
-
-  const deleteScene = async (sceneId: number) => {
-    if (!confirm('删除场次后，该场次下的视频将归到"未分类"，确定？')) return;
-    try {
-      const res = await fetch(`/api/video2/scenes/${sceneId}`, { method: 'DELETE' });
-      const data = await res.json();
-      if (data.success) { setScenes(prev => prev.filter(s => s.id !== sceneId)); if (currentSceneId === sceneId) setCurrentSceneId(null); loadVideos(); showToast('场次已删除'); }
-    } catch (e) { console.error('删除场次失败:', e); }
-    setShowSceneMenu(null);
-  };
-
-  const renameScene = async (sceneId: number) => {
-    const name = prompt('请输入新的场次名称');
-    if (!name?.trim()) return;
-    try {
-      const res = await fetch(`/api/video2/scenes/${sceneId}`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim() })
-      });
-      const data = await res.json();
-      if (data.success) { setScenes(prev => prev.map(s => s.id === sceneId ? { ...s, name: name.trim() } : s)); showToast('场次已重命名'); }
-    } catch (e) { console.error('重命名失败:', e); }
-    setShowSceneMenu(null);
-  };
-
+  // ============ 批量 ============
   const toggleSelect = (id: number) => {
-    setSelectedIds(prev => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; });
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   };
 
   const selectAll = () => {
-    if (selectedIds.size === filteredVideos.length) setSelectedIds(new Set());
-    else setSelectedIds(new Set(filteredVideos.map(v => v.id)));
+    if (selectedIds.size === items.length) setSelectedIds(new Set());
+    else setSelectedIds(new Set(items.map(it => it.id)));
   };
 
-  const filteredVideos = videos;
+  const batchSoftDelete = async () => {
+    if (selectedIds.size === 0) return;
+    const ids = Array.from(selectedIds);
+    try {
+      await fetch('/api/video2/videos/batch-update', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids, action: 'softDelete' })
+      });
+      setItems(prev => prev.filter(it => !ids.includes(it.id)));
+      setSelectedIds(new Set());
+      loadStats();
+      showToast(`已将 ${ids.length} 项移到垃圾桶`);
+    } catch (e) {
+      console.error('批量删除失败:', e);
+    }
+  };
+
+  const batchRestore = async () => {
+    if (selectedIds.size === 0) return;
+    const ids = Array.from(selectedIds);
+    try {
+      await fetch('/api/video2/videos/batch-update', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids, action: 'restore' })
+      });
+      setItems(prev => prev.filter(it => !ids.includes(it.id)));
+      setSelectedIds(new Set());
+      loadStats();
+      showToast(`已恢复 ${ids.length} 项`);
+    } catch (e) {
+      console.error('批量恢复失败:', e);
+    }
+  };
+
+  const batchHardDelete = async () => {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`确定彻底删除所选 ${selectedIds.size} 项？无法恢复。`)) return;
+    const ids = Array.from(selectedIds);
+    try {
+      await fetch('/api/video2/videos/batch-update', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids, action: 'hardDelete' })
+      });
+      setItems(prev => prev.filter(it => !ids.includes(it.id)));
+      setSelectedIds(new Set());
+      loadStats();
+      showToast(`已彻底删除 ${ids.length} 项`);
+    } catch (e) {
+      console.error('批量彻底删除失败:', e);
+    }
+  };
+
+  const batchMoveToScene = async (sceneId: number | null) => {
+    if (selectedIds.size === 0) return;
+    const ids = Array.from(selectedIds);
+    try {
+      await fetch('/api/video2/videos/batch-update', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids, action: 'changeScene', sceneId })
+      });
+      setItems(prev => prev.filter(it => !ids.includes(it.id)));
+      setSelectedIds(new Set());
+      setShowMoveModal(false);
+      showToast(`已移动 ${ids.length} 项`);
+    } catch (e) {
+      console.error('批量移动失败:', e);
+    }
+  };
+
+  // ============ 封面设置 ============
+  const setAsCover = async (item: MediaItem) => {
+    try {
+      let coverUrl = item.url;
+      if (item.type === 'video') {
+        // 视频使用 OSS 截图作为封面
+        coverUrl = getPosterUrl(item.url) || item.url;
+      }
+      await fetch(`/api/video2/projects/${projectId}/cover`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ coverUrl })
+      });
+      setProject(prev => prev ? { ...prev, coverUrl } : prev);
+      showToast('已设为项目封面');
+    } catch (e) {
+      console.error('设置封面失败:', e);
+    }
+  };
+
+  // ============ 场次管理 ============
+  const createScene = async () => {
+    const name = newSceneName.trim();
+    if (!name) return;
+    try {
+      const res = await fetch(`/api/video2/projects/${projectId}/scenes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setNewSceneName('');
+        setShowNewSceneModal(false);
+        loadScenes();
+        showToast('已创建场次');
+      }
+    } catch (e) {
+      console.error('创建场次失败:', e);
+    }
+  };
+
+  const renameScene = async () => {
+    if (showRenameSceneId === null) return;
+    const name = renameSceneName.trim();
+    if (!name) return;
+    try {
+      await fetch(`/api/video2/scenes/${showRenameSceneId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name })
+      });
+      setShowRenameSceneId(null);
+      setRenameSceneName('');
+      loadScenes();
+    } catch (e) {
+      console.error('重命名失败:', e);
+    }
+  };
+
+  const deleteScene = async (id: number) => {
+    if (!confirm('删除本场次？该场次下的素材将移到未分类，不会删除。')) return;
+    try {
+      await fetch(`/api/video2/scenes/${id}`, { method: 'DELETE' });
+      if (currentSceneId === id) setCurrentSceneId(null);
+      loadScenes();
+      showToast('场次已删除');
+    } catch (e) {
+      console.error('删除场次失败:', e);
+    }
+  };
+
+  // ============ 上传 ============
+  const handleUploadFiles = async (files: FileList | File[]) => {
+    const list = Array.from(files);
+    if (list.length === 0) return;
+
+    // 过滤非图片/视频
+    const valid = list.filter(f => {
+      const d = detectFileType(f);
+      if (!d.supported) {
+        showToast(`忽略不支持的文件：${f.name}`);
+      }
+      return d.supported;
+    });
+    if (valid.length === 0) return;
+
+    const initial: UploadingFile[] = valid.map(f => ({
+      id: `${Date.now()}-${Math.random().toString(36).substr(2, 8)}`,
+      name: f.name,
+      size: f.size,
+      progress: 5,
+      status: 'uploading'
+    }));
+    setUploadingFiles(initial);
+
+    for (let i = 0; i < valid.length; i++) {
+      const file = valid[i];
+      const detected = detectFileType(file);
+      try {
+        if (detected.type === 'image') {
+          await uploadVideo2Image(file, {
+            projectId,
+            sceneId: currentSceneId !== null ? currentSceneId : undefined,
+            title: file.name
+          });
+          setUploadingFiles(prev => prev.map((uf, idx) => idx === i ? { ...uf, progress: 100, status: 'done', message: '完成' } : uf));
+        } else {
+          await uploadVideo2Video(file, {
+            projectId,
+            sceneId: currentSceneId !== null ? currentSceneId : undefined,
+            title: file.name,
+            compress: file.size > 50 * 1024 * 1024,
+            onProgress: p => {
+              setUploadingFiles(prev => prev.map((uf, idx) => idx === i ? { ...uf, progress: p.progress, message: p.message } : uf));
+            }
+          });
+          setUploadingFiles(prev => prev.map((uf, idx) => idx === i ? { ...uf, progress: 100, status: 'done', message: '完成' } : uf));
+        }
+      } catch (e) {
+        console.error('上传失败:', file.name, e);
+        setUploadingFiles(prev => prev.map((uf, idx) => idx === i ? { ...uf, status: 'error', message: String(e) } : uf));
+      }
+    }
+
+    // 刷新列表
+    await loadItems();
+    await loadStats();
+    showToast(`上传完成（${valid.length} 项）`);
+  };
+
+  const handleUploadFromUrl = async () => {
+    const url = urlInputValue.trim();
+    if (!url) return;
+    const newItem: UploadingFile = {
+      id: `${Date.now()}-url`,
+      name: url.substring(0, 50) + '...',
+      size: 0,
+      progress: 20,
+      status: 'uploading'
+    };
+    setUploadingFiles(prev => [...prev, newItem]);
+    try {
+      await uploadVideo2FromUrl(url, {
+        projectId,
+        sceneId: currentSceneId !== null ? currentSceneId : undefined,
+        title: url
+      });
+      setUploadingFiles(prev => prev.map(uf => uf.id === newItem.id ? { ...uf, progress: 100, status: 'done', message: '转存完成' } : uf));
+      setUrlInputValue('');
+      await loadItems();
+      await loadStats();
+    } catch (e) {
+      setUploadingFiles(prev => prev.map(uf => uf.id === newItem.id ? { ...uf, status: 'error', message: String(e) } : uf));
+    }
+  };
+
+  // ============ 分享 ============
+  const handleShare = async () => {
+    const shareUrl = (window.location.origin) + `/share/video2/project/${projectId}`;
+    setupShareMetadata({
+      title: project?.name || '项目',
+      desc: project?.description || '',
+      link: shareUrl,
+      imgUrl: project?.coverUrl || ''
+    });
+    await copyToClipboard(shareUrl);
+    setShareHintMode(checkIsWeChat() ? 'wechat' : 'default');
+    setShareHintVisible(true);
+  };
+
+  // ============ 滚动 & 导航 ============
+  const backToProjectList = () => {
+    window.location.href = '/video2';
+  };
+
+  // ============ 渲染 ============
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-violet-950 to-pink-950 text-white flex items-center justify-center">
+        <div className="text-slate-400">加载中...</div>
+      </div>
+    );
+  }
+
+  // 渲染单个媒体卡片
+  const renderMediaCard = (item: MediaItem, index: number) => {
+    const isSelected = selectedIds.has(item.id);
+    const isImage = item.type === 'image';
+    const shotLabel = currentTab === 'trash'
+      ? `删除于 ${timeAgo(item.deletedAt || item.updatedAt)}`
+      : `镜头 ${index + 1}`;
+
+    return (
+      <div key={item.id} className="relative rounded-2xl border border-white/10 bg-white/[0.03] overflow-hidden hover:border-violet-400/30 transition">
+        {/* 左上：复选框 */}
+        <button
+          onClick={() => toggleSelect(item.id)}
+          className={`absolute top-3 left-3 z-20 w-8 h-8 rounded-full border flex items-center justify-center transition text-xs ${isSelected ? 'border-violet-400 bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white' : 'border-white/25 bg-black/50 text-white/70 hover:bg-black/70'}`}
+        >
+          {isSelected ? <CheckCircle2 className="w-4 h-4" /> : null}
+        </button>
+
+        {/* 媒体区 */}
+        <div className="relative aspect-video bg-black/40 overflow-hidden">
+          {isImage ? (
+            <img src={item.url} alt={item.title} className="w-full h-full object-contain bg-black/70" />
+          ) : (
+            <>
+              <video
+                src={item.url}
+                className="w-full h-full object-cover"
+                preload="metadata"
+                controls={false}
+                playsInline
+                onClick={(e) => {
+                  (e.currentTarget as HTMLVideoElement).play();
+                }}
+              />
+            </>
+          )}
+
+          {/* 中央：播放按钮（仅视频） */}
+          {!isImage && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                // 让用户点击视频来播放；这里只是视觉提示
+                const v = (e.currentTarget.parentElement?.querySelector('video')) as HTMLVideoElement | null;
+                if (v) v.play();
+              }}
+              className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-90"
+            >
+              <span className="w-16 h-16 rounded-full border-2 border-violet-400/70 bg-black/40 backdrop-blur flex items-center justify-center">
+                <Play className="w-7 h-7 text-violet-200 fill-violet-200 ml-1" />
+              </span>
+            </button>
+          )}
+
+          {/* 右上角：全屏 */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setFullscreenItem(item);
+            }}
+            className="absolute top-3 right-3 z-20 w-10 h-10 rounded-full border border-violet-400/40 bg-white/5 hover:bg-gradient-to-br hover:from-violet-500 hover:to-fuchsia-500 hover:border-transparent flex items-center justify-center transition"
+            title="全屏查看"
+          >
+            <Maximize2 className="w-5 h-5 text-white/90" />
+          </button>
+        </div>
+
+        {/* 下方操作区 */}
+        <div className="p-3 sm:p-4">
+          {/* 标题 */}
+          <div className="mb-3">
+            <input
+              type="text"
+              defaultValue={item.title}
+              onBlur={(e) => {
+                const v = e.currentTarget.value.trim();
+                if (v && v !== item.title) updateTitle(item.id, v);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur();
+                if (e.key === 'Escape') (e.currentTarget as HTMLInputElement).value = item.title;
+              }}
+              className="w-full text-sm font-medium bg-transparent border-b border-transparent hover:border-white/20 focus:border-violet-400/60 outline-none py-1 transition"
+            />
+          </div>
+
+          {/* 底部操作行：左下角「拍摄/未拍摄」+ 中间「镜头N」+ 右侧「设为封面」 */}
+          <div className="flex items-center gap-2">
+            {currentTab !== 'trash' ? (
+              <button
+                onClick={() => toggleStatus(item)}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition ${item.status === 'done' ? 'border-green-400/50 bg-green-500/15 text-green-200 hover:bg-green-500/25' : 'border-violet-400/40 bg-violet-500/15 text-violet-200 hover:bg-violet-500/25'}`}
+              >
+                {item.status === 'done' ? (
+                  <><CheckCircle2 className="w-3.5 h-3.5" /> 未拍摄</>
+                ) : (
+                  <><GripVertical className="w-3.5 h-3.5" /> 拍摄</>
+                )}
+              </button>
+            ) : (
+              <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs text-slate-400 border border-white/10">
+                <Trash2 className="w-3.5 h-3.5" /> 已删除
+              </div>
+            )}
+
+            <div className="text-xs text-slate-400 flex-1 text-center">{shotLabel}</div>
+
+            {/* 右侧：设为封面 / 垃圾桶操作 */}
+            {currentTab === 'trash' ? (
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => restoreItem(item.id)}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-full text-xs border border-white/15 hover:bg-white/10 transition text-slate-300"
+                  title="恢复"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" /> 恢复
+                </button>
+                <button
+                  onClick={() => hardDelete(item.id)}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-full text-xs border border-red-400/30 hover:bg-red-500/20 text-red-200 transition"
+                  title="彻底删除"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => setAsCover(item)}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-full text-xs border border-violet-400/30 hover:bg-violet-500/20 text-violet-200 transition"
+                  title="设为项目封面"
+                >
+                  <ImageIcon className="w-3.5 h-3.5" /> 封面
+                </button>
+                <button
+                  onClick={() => softDelete(item.id)}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-full text-xs border border-white/15 hover:bg-white/10 text-slate-300 transition"
+                  title="移到垃圾桶"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // 当前列表：按 sortOrder 排序，显示镜头编号从 1
+  const sortedItems = [...items].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-[#0a0f1f] via-[#0d1033] to-[#0a0f1f] text-on-surface pb-20">
-      {/* 顶部标题栏 */}
-      <header className="sticky top-0 z-20 bg-[#0a0f1f]/95 backdrop-blur border-b border-white/10 px-4 py-3 flex items-center gap-3">
-        <button onClick={() => window.location.href = '/video2'} className="p-1.5 rounded-lg hover:bg-white/10 transition-colors">
-          <ArrowLeft className="w-5 h-5 text-white" />
-        </button>
-        <div className="flex-1 min-w-0">
-          <h1 className="font-bold text-white truncate">{project?.name || '加载中...'}</h1>
-        </div>
-        {project && (
-          <button onClick={async () => {
-            setupShareMetadata({ title: project.name, desc: project.description || '项目分享', link: project.shareUrl, imgUrl: project.coverUrl || '/images/hero-home.png' });
-            const ok = await copyToClipboard(project.shareUrl);
-            showToast(ok ? '分享链接已复制' : '复制失败');
-          }} className="p-2 rounded-lg hover:bg-white/10 transition-colors">
-            <Share2 className="w-5 h-5 text-white" />
-          </button>
-        )}
-        <button
-          onClick={() => setIsUploadOpen(!isUploadOpen)}
-          className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all flex items-center gap-1.5 ${
-            isUploadOpen ? 'bg-white/10 text-white' : 'bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white shadow'
-          }`}
-        >
-          {isUploadOpen ? <><X className="w-4 h-4" /> 关闭</> : <><Upload className="w-4 h-4" /> 上传</>}
-        </button>
-      </header>
-
-      {/* 场次 Tab 栏 */}
-      <div className="sticky top-[57px] z-10 bg-[#0a0f1f]/95 backdrop-blur border-b border-white/5 px-4 py-2 overflow-x-auto scrollbar-hide">
-        <div className="flex items-center gap-2 w-max">
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-violet-950 to-pink-950 text-white pb-24">
+      {/* 顶部栏 */}
+      <div className="sticky top-0 z-30 backdrop-blur-xl bg-slate-900/75 border-b border-white/10">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 sm:py-4 flex items-center gap-3">
           <button
-            onClick={() => handleSceneChange(null)}
-            className={`px-4 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-all ${
-              currentSceneId === null ? 'bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white' : 'bg-white/5 text-white/70 hover:bg-white/10'
-            }`}
+            onClick={backToProjectList}
+            className="w-9 h-9 rounded-full border border-white/20 bg-white/5 hover:bg-white/10 flex items-center justify-center transition"
           >
-            未分类
+            <ArrowLeft className="w-4 h-4" />
           </button>
-          {scenes.map(scene => (
-            <div key={scene.id} className="relative">
-              <button
-                onClick={() => handleSceneChange(scene.id)}
-                onContextMenu={e => { e.preventDefault(); setShowSceneMenu(showSceneMenu === scene.id ? null : scene.id); }}
-                className={`px-4 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-all flex items-center gap-1 ${
-                  currentSceneId === scene.id ? 'bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white' : 'bg-white/5 text-white/70 hover:bg-white/10'
-                }`}
-              >
-                {scene.name}
-                <span className="text-xs opacity-60">({scene.videoCount})</span>
-              </button>
-              {showSceneMenu === scene.id && (
-                <div className="absolute top-full mt-1 right-0 bg-[#1a1a2e] border border-white/10 rounded-lg shadow-xl py-1 z-30 min-w-[100px]">
-                  <button onClick={() => renameScene(scene.id)} className="w-full px-3 py-1.5 text-sm text-left hover:bg-white/10 text-white">重命名</button>
-                  <button onClick={() => deleteScene(scene.id)} className="w-full px-3 py-1.5 text-sm text-left hover:bg-red-500/20 text-red-400">删除</button>
-                </div>
-              )}
-            </div>
-          ))}
+          <div className="flex-1 min-w-0">
+            <h1 className="text-base sm:text-xl font-bold truncate">{project?.name || '项目'}</h1>
+            {project?.description && (
+              <p className="text-xs text-slate-400 hidden sm:block truncate">{project.description}</p>
+            )}
+          </div>
           <button
-            onClick={() => setShowNewSceneModal(true)}
-            className="px-3 py-1.5 rounded-lg text-sm font-medium bg-white/5 text-white/70 hover:bg-white/10 transition-all flex items-center gap-1"
+            onClick={handleShare}
+            className="w-9 h-9 rounded-full border border-violet-400/40 bg-white/5 hover:bg-gradient-to-br hover:from-violet-500 hover:to-fuchsia-500 hover:border-transparent flex items-center justify-center transition"
+            title="分享项目"
           >
-            <Plus className="w-4 h-4" />
+            <Share2 className="w-4 h-4 text-white/90" />
           </button>
-        </div>
-      </div>
-
-      {/* 批量工具栏 */}
-      {selectedIds.size > 0 && currentTab !== 'trash' && (
-        <div className="sticky top-[100px] z-10 bg-violet-600/90 backdrop-blur px-4 py-2 flex items-center gap-3 shadow-lg">
-          <button onClick={selectAll} className="text-sm text-white/90 hover:text-white">
-            {selectedIds.size === filteredVideos.length ? '取消全选' : '全选'}
-          </button>
-          <span className="text-sm text-white/80">已选 {selectedIds.size} 个</span>
-          <div className="flex-1" />
-          <button onClick={() => setShowMoveModal(true)} className="px-3 py-1 rounded-lg bg-white/20 hover:bg-white/30 text-sm text-white transition-colors">移动到</button>
-          <button onClick={() => handleBatchOp('softDelete')} className="px-3 py-1 rounded-lg bg-red-500/80 hover:bg-red-500 text-sm text-white transition-colors flex items-center gap-1">
-            <Trash2 className="w-3.5 h-3.5" /> 删除
-          </button>
-        </div>
-      )}
-      {selectedIds.size > 0 && currentTab === 'trash' && (
-        <div className="sticky top-[100px] z-10 bg-[#1a1a2e] backdrop-blur border border-white/10 px-4 py-2 flex items-center gap-3 shadow-lg">
-          <button onClick={selectAll} className="text-sm text-white/70 hover:text-white">
-            {selectedIds.size === filteredVideos.length ? '取消全选' : '全选'}
-          </button>
-          <span className="text-sm text-white/60">已选 {selectedIds.size} 个</span>
-          <div className="flex-1" />
-          <button onClick={() => handleBatchOp('restore')} className="px-3 py-1 rounded-lg bg-green-600/80 hover:bg-green-600 text-sm text-white transition-colors flex items-center gap-1">
-            <RotateCcw className="w-3.5 h-3.5" /> 恢复
-          </button>
-          <button onClick={() => handleBatchOp('hardDelete')} className="px-3 py-1 rounded-lg bg-red-600/80 hover:bg-red-600 text-sm text-white transition-colors flex items-center gap-1">
-            <Trash2 className="w-3.5 h-3.5" /> 彻底删除
-          </button>
-        </div>
-      )}
-
-      {/* 上传区域 */}
-      {isUploadOpen && currentTab !== 'trash' && (
-        <div className="px-4 pt-3">
-          <div
-            onDragOver={e => { e.preventDefault(); setIsDragOver(true); }}
-            onDragLeave={() => setIsDragOver(false)}
-            onDrop={e => { e.preventDefault(); setIsDragOver(false); handleFileSelect(e.dataTransfer.files); }}
-            onClick={() => fileInputRef.current?.click()}
-            className={`border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition-all ${isDragOver ? 'border-violet-400 bg-violet-500/10' : 'border-white/10 hover:border-violet-400/50'}`}
+          <button
+            onClick={() => setShowUploadDialog(true)}
+            className="inline-flex items-center gap-2 px-3 sm:px-4 py-2 rounded-full border border-violet-400/40 bg-gradient-to-br from-violet-500 to-fuchsia-500 hover:shadow-lg hover:shadow-violet-500/30 text-white text-sm font-medium transition"
           >
-            <input ref={fileInputRef} type="file" multiple accept="video/*" className="hidden"
-              onChange={e => { handleFileSelect(e.target.files); e.target.value = ''; }} />
-            <div className="flex flex-col items-center gap-2">
-              <div className="w-12 h-12 rounded-full bg-violet-500/20 flex items-center justify-center">
-                <FileVideo className="w-6 h-6 text-violet-400" />
-              </div>
-              <p className="text-sm text-white/70">点击选择视频文件或拖拽到此处上传</p>
-            </div>
-          </div>
-          {/* 上传进度 */}
-          {uploadingFiles.length > 0 && (
-            <div className="mt-3 space-y-2">
-              {uploadingFiles.map(f => (
-                <div key={f.id} className="bg-white/5 border border-white/10 rounded-xl p-3 flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-violet-500/20 flex items-center justify-center flex-shrink-0">
-                    {f.status === 'done' ? <Check className="w-4 h-4 text-green-400" /> : f.status === 'error' ? <X className="w-4 h-4 text-red-400" /> : <Play className="w-4 h-4 text-violet-400" />}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex justify-between mb-1">
-                      <span className="text-sm truncate max-w-[180px]">{f.name}</span>
-                      <span className="text-xs text-white/50 ml-2 flex-shrink-0">
-                        {f.status === 'done' ? '完成' : f.status === 'error' ? '失败' : `${f.progress}%`}
-                      </span>
-                    </div>
-                    <div className="h-1 bg-white/10 rounded-full overflow-hidden">
-                      <div className={`h-full transition-all ${f.status === 'error' ? 'bg-red-500' : f.status === 'done' ? 'bg-green-500' : 'bg-gradient-to-r from-violet-500 to-fuchsia-500'}`}
-                        style={{ width: `${f.progress}%` }} />
-                    </div>
-                    {f.status === 'error' && f.errorMsg && <p className="text-xs text-red-400 mt-1">{f.errorMsg}</p>}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* 视频列表 */}
-      <div className="px-4 pt-4">
-        {loading ? (
-          <div className="text-center py-16 text-white/50">加载中...</div>
-        ) : filteredVideos.length === 0 ? (
-          <div className="text-center py-20">
-            <div className="w-16 h-16 mx-auto rounded-full bg-white/5 flex items-center justify-center mb-4">
-              <FileVideo className="w-8 h-8 text-white/30" />
-            </div>
-            <p className="text-white/50">
-              {currentTab === 'trash' ? '垃圾桶是空的' : currentTab === 'pending' ? '暂无未拍摄视频' : '暂无已拍摄视频'}
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {filteredVideos.map(video => (
-              <div
-                key={video.id} data-video-card data-id={video.id}
-                draggable={currentTab !== 'trash'}
-                onDragStart={e => onCardDragStart(e, video.id)}
-                onDragOver={e => onCardDragOver(e, video.id)}
-                onDrop={e => onCardDrop(e, video.id)}
-                onDragEnd={onCardDragEnd}
-                className={`bg-[#111827] border rounded-2xl overflow-hidden transition-all select-none ${
-                  draggingId === video.id ? 'opacity-40 border-violet-400 scale-[0.98]' :
-                  dragOverId === video.id ? 'border-violet-400 shadow-lg shadow-violet-500/20' : 'border-white/10'
-                }`}
-              >
-                {/* 播放区 */}
-                <div className="relative bg-black aspect-video overflow-hidden">
-                  {(() => {
-                    const posterUrl = getPosterUrl(video.url);
-                    return posterUrl ? (
-                      <img data-poster-img={video.id} src={posterUrl} alt={video.title}
-                        className="absolute inset-0 w-full h-full object-cover z-10"
-                        style={{ opacity: 1, transition: 'opacity 200ms' }}
-                        onError={e => {
-                          const el = e.currentTarget as HTMLImageElement;
-                          const retries = posterRetryRef.current.get(video.id) || 0;
-                          if (retries < POSTER_MAX_RETRY) {
-                            posterRetryRef.current.set(video.id, retries + 1);
-                            const t = setTimeout(() => { el.src = getPosterUrl(video.url) + '&_retry=' + Date.now(); }, POSTER_RETRY_DELAY * (retries + 1));
-                            el.addEventListener('load', () => clearTimeout(t), { once: true });
-                          } else { posterReadyRef.current.set(video.id, true); }
-                        }} />
-                    ) : null;
-                  })()}
-                  <video
-                    ref={el => registerVideoRef(video.id, el)}
-                    data-video-id={video.id} src={video.url}
-                    poster={getPosterUrl(video.url) || undefined} loop muted playsInline preload="none"
-                    onClick={() => { const v = videoRefs.current.get(video.id); if (v) togglePlay(v, video.id); }}
-                    onPlay={e => {
-                      const v = e.currentTarget as HTMLVideoElement;
-                      v.style.opacity = '1';
-                      const poster = v.parentElement?.querySelector(`[data-poster-img="${video.id}"]`) as HTMLImageElement;
-                      if (poster) poster.style.opacity = '0';
-                      const playBtn = v.parentElement?.querySelector(`[data-play-button="${video.id}"]`) as HTMLElement;
-                      if (playBtn) { playBtn.style.opacity = '0'; playBtn.style.pointerEvents = 'none'; }
-                    }}
-                    onPause={e => {
-                      const v = e.currentTarget as HTMLVideoElement;
-                      v.style.opacity = '0';
-                      const poster = v.parentElement?.querySelector(`[data-poster-img="${video.id}"]`) as HTMLImageElement;
-                      if (poster) poster.style.opacity = '1';
-                      const playBtn = v.parentElement?.querySelector(`[data-play-button="${video.id}"]`) as HTMLElement;
-                      if (playBtn) { playBtn.style.opacity = '1'; playBtn.style.pointerEvents = 'auto'; }
-                    }}
-                    onEnded={e => {
-                      const v = e.currentTarget as HTMLVideoElement; v.style.opacity = '0';
-                      const poster = v.parentElement?.querySelector(`[data-poster-img="${video.id}"]`) as HTMLImageElement;
-                      if (poster) poster.style.opacity = '1';
-                      const playBtn = v.parentElement?.querySelector(`[data-play-button="${video.id}"]`) as HTMLElement;
-                      if (playBtn) { playBtn.style.opacity = '1'; playBtn.style.pointerEvents = 'auto'; }
-                    }}
-                    onFullscreenChange={e => {
-                      const v = e.target as HTMLVideoElement;
-                      const fsEl = (document as any).fullscreenElement || (document as any).webkitFullscreenElement;
-                      if (!fsEl || fsEl !== v) { v.muted = true; v.controls = false; }
-                    }}
-                    className="absolute inset-0 w-full h-full object-contain cursor-pointer" style={{ opacity: 0, transition: 'opacity 200ms', background: 'transparent' }} />
-                  {/* 播放按钮：蓝紫渐变粗线 */}
-                  <div onClick={e => { e.stopPropagation(); const v = videoRefs.current.get(video.id); if (v) togglePlay(v, video.id); }}
-                    className="absolute inset-0 flex items-center justify-center z-20 cursor-pointer"
-                    data-play-button={video.id} style={{ transition: 'opacity 200ms' }}>
-                    <div className="w-14 h-14 rounded-full bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shadow-lg shadow-fuchsia-500/40 hover:scale-105 transition-transform">
-                      <Play className="w-7 h-7 text-white ml-0.5" strokeWidth={2.5} />
-                    </div>
-                  </div>
-                  {/* 全屏按钮：蓝紫渐变 */}
-                  <button onClick={e => { e.stopPropagation(); const v = videoRefs.current.get(video.id); if (v) toggleFullscreen(v, video.id); }}
-                    className="absolute bottom-2 right-2 w-9 h-9 rounded-full bg-gradient-to-br from-violet-500/80 to-fuchsia-500/80 flex items-center justify-center z-20 hover:scale-105 transition-transform shadow">
-                    <Maximize className="w-4 h-4 text-white" strokeWidth={2.5} />
-                  </button>
-                  {/* 复选框 */}
-                  <button onClick={() => toggleSelect(video.id)}
-                    className={`absolute top-2 left-2 w-7 h-7 rounded-lg border-2 flex items-center justify-center z-20 transition-all ${
-                      selectedIds.has(video.id) ? 'bg-violet-500 border-violet-500' : 'bg-black/40 border-white/40 hover:border-white/70'
-                    }`}>
-                    {selectedIds.has(video.id) && <Check className="w-4 h-4 text-white" strokeWidth={3} />}
-                  </button>
-                </div>
-                {/* 底部信息栏 */}
-                <div className="flex items-center gap-2 p-3">
-                  {/* 标题 */}
-                  <div className="flex-1 min-w-0">
-                    {editingTitleId === video.id ? (
-                      <input
-                        autoFocus value={editingTitleText}
-                        onChange={e => setEditingTitleText(e.target.value)}
-                        onBlur={() => saveTitle(video.id)}
-                        onKeyDown={e => { if (e.key === 'Enter') saveTitle(video.id); if (e.key === 'Escape') setEditingTitleId(null); }}
-                        className="w-full px-2 py-0.5 bg-white/10 border border-violet-400/50 rounded text-sm text-white focus:outline-none"
-                      />
-                    ) : (
-                      <p onClick={() => currentTab !== 'trash' && (setEditingTitleId(video.id), setEditingTitleText(video.title))}
-                        className={`text-sm font-medium truncate cursor-pointer hover:text-violet-300 ${currentTab === 'trash' ? 'text-white/50' : 'text-white'}`}>
-                        {video.title}
-                      </p>
-                    )}
-                    <div className="flex items-center gap-2 mt-0.5">
-                      {currentTab === 'trash' ? (
-                        <span className="text-xs text-white/40">{timeAgo(video.deletedAt || video.updatedAt)}</span>
-                      ) : (
-                        <>
-                          <span className="text-xs text-white/40">{formatSize(video.size)}</span>
-                          <button
-                            onClick={() => toggleVideoStatus(video)}
-                            className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${
-                              video.status === 'done' ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30' : 'bg-white/10 text-white/60 hover:bg-white/20'
-                            }`}>
-                            {video.status === 'done' ? '✓ 已拍摄' : '○ 未拍摄'}
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                  {currentTab === 'trash' ? (
-                    <div className="flex items-center gap-1">
-                      <button onClick={() => restoreVideo(video.id)} className="p-2 rounded-lg text-green-400/70 hover:text-green-400 hover:bg-green-500/20 transition-all" title="恢复">
-                        <RotateCcw className="w-4 h-4" />
-                      </button>
-                      <button onClick={() => hardDeleteVideo(video.id)} className="p-2 rounded-lg text-red-400/70 hover:text-red-400 hover:bg-red-500/20 transition-all" title="彻底删除">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  ) : (
-                    <>
-                      {currentTab !== 'trash' && (
-                        <div className="flex items-center justify-center flex-shrink-0 w-7 h-7">
-                          <GripVertical className="w-4 h-4 text-white/30 cursor-grab" />
-                        </div>
-                      )}
-                      <button onClick={() => softDeleteVideo(video.id)} className="p-2 rounded-lg text-white/40 hover:text-red-400 hover:bg-red-500/10 transition-all" title="删除到垃圾桶">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* 底部常驻 Tab（sticky） */}
-      <div className="fixed bottom-0 left-0 right-0 z-20 bg-[#0a0f1f]/95 backdrop-blur border-t border-white/10 flex">
-        {([
-          { key: 'pending', label: '未拍摄', count: stats.pending },
-          { key: 'done', label: '已拍摄', count: stats.done },
-          { key: 'trash', label: '垃圾桶', count: stats.trash, red: true }
-        ] as const).map(tab => (
-          <button key={tab.key}
-            onClick={() => { setCurrentTab(tab.key); setSelectedIds(new Set()); }}
-            className={`flex-1 py-3 text-sm font-medium transition-all flex items-center justify-center gap-1.5 ${
-              currentTab === tab.key ? 'border-t-2 border-violet-500 text-white' : 'text-white/50 hover:text-white/80 border-t-2 border-transparent'
-            } ${tab.red ? 'text-red-400/70' : ''}`}
-          >
-            {tab.label}({tab.count})
+            <Upload className="w-4 h-4" />
+            <span className="hidden sm:inline">批量上传</span>
+            <span className="inline sm:hidden">上传</span>
           </button>
-        ))}
-      </div>
-
-      {/* 新建场次弹窗 */}
-      {showNewSceneModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setShowNewSceneModal(false)}>
-          <div className="bg-[#1a1a2e] rounded-xl border border-white/10 w-full max-w-sm p-5" onClick={e => e.stopPropagation()}>
-            <h3 className="font-bold text-white mb-3">新建场次</h3>
-            <input autoFocus type="text" value={newSceneName} onChange={e => setNewSceneName(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && createScene()}
-              placeholder="例如：场地A / 补拍" className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:border-violet-400" />
-            <div className="flex justify-end gap-2 mt-3">
-              <button onClick={() => setShowNewSceneModal(false)} className="px-4 py-2 rounded-lg border border-white/10 text-white/70 text-sm hover:bg-white/10">取消</button>
-              <button onClick={createScene} className="px-4 py-2 rounded-lg bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white text-sm font-medium">创建</button>
-            </div>
-          </div>
         </div>
-      )}
 
-      {/* 移动到场次弹窗 */}
-      {showMoveModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setShowMoveModal(false)}>
-          <div className="bg-[#1a1a2e] rounded-xl border border-white/10 w-full max-w-sm p-5" onClick={e => e.stopPropagation()}>
-            <h3 className="font-bold text-white mb-3">移动到</h3>
-            <button onClick={() => handleBatchOp('changeScene', null)} className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/10 text-white/80 text-sm transition-colors">
+        {/* 场次 Tab 栏 */}
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 pb-3 overflow-x-auto">
+          <div className="flex items-center gap-2 min-w-max">
+            {/* null = 未分类 */}
+            <button
+              onClick={() => { setCurrentSceneId(null); setSelectedIds(new Set()); }}
+              className={`px-3 sm:px-4 py-1.5 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap border transition ${currentSceneId === null ? 'bg-gradient-to-br from-violet-500 to-fuchsia-500 border-transparent text-white shadow-lg shadow-violet-500/25' : 'border-white/15 bg-white/5 text-slate-300 hover:bg-white/10'}`}
+              title="未分类"
+            >
               未分类
             </button>
-            {scenes.map(s => (
-              <button key={s.id} onClick={() => handleBatchOp('changeScene', s.id)}
-                className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/10 text-white/80 text-sm transition-colors">
-                {s.name}
-              </button>
+            {scenes.map(scene => (
+              <div key={scene.id} className="relative group">
+                <button
+                  onClick={() => { setCurrentSceneId(scene.id); setSelectedIds(new Set()); }}
+                  onContextMenu={(e) => { e.preventDefault(); setShowRenameSceneId(scene.id); setRenameSceneName(scene.name); }}
+                  className={`px-3 sm:px-4 py-1.5 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap border transition ${currentSceneId === scene.id ? 'bg-gradient-to-br from-violet-500 to-fuchsia-500 border-transparent text-white shadow-lg shadow-violet-500/25' : 'border-white/15 bg-white/5 text-slate-300 hover:bg-white/10'}`}
+                  title="右键重命名 / 删除"
+                >
+                  {scene.name}
+                </button>
+              </div>
             ))}
-            <div className="mt-3 flex justify-end">
-              <button onClick={() => setShowMoveModal(false)} className="px-4 py-2 rounded-lg border border-white/10 text-white/70 text-sm hover:bg-white/10">取消</button>
+            {/* + 新建场次 */}
+            <button
+              onClick={() => setShowNewSceneModal(true)}
+              className="w-8 h-8 rounded-full border border-dashed border-white/25 hover:border-violet-400/50 hover:bg-violet-500/10 text-slate-400 hover:text-violet-200 flex items-center justify-center transition shrink-0"
+              title="新建场次"
+            >
+              <Plus className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* 主体内容 */}
+      <div ref={containerRef} className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+        {/* 批量操作栏（选中时显示） */}
+        {selectedIds.size > 0 && (
+          <div className="mb-4 p-3 rounded-2xl border border-violet-400/30 bg-violet-500/10 backdrop-blur flex items-center gap-2 flex-wrap">
+            <button
+              onClick={selectAll}
+              className="px-3 py-1.5 rounded-full text-xs border border-white/20 bg-white/5 hover:bg-white/10 transition"
+            >
+              全选 {items.length}
+            </button>
+            <span className="text-xs text-slate-300">已选 {selectedIds.size}</span>
+            <span className="flex-1" />
+            {currentTab === 'trash' ? (
+              <>
+                <button
+                  onClick={batchRestore}
+                  className="px-3 py-1.5 rounded-full text-xs border border-white/20 bg-white/5 hover:bg-white/10 transition"
+                >
+                  <RotateCcw className="w-3.5 h-3.5 inline mr-1" /> 恢复
+                </button>
+                <button
+                  onClick={batchHardDelete}
+                  className="px-3 py-1.5 rounded-full text-xs border border-red-400/30 bg-red-500/10 hover:bg-red-500/20 text-red-200 transition"
+                >
+                  <Trash2 className="w-3.5 h-3.5 inline mr-1" /> 彻底删除
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={() => setShowMoveModal(true)}
+                  className="px-3 py-1.5 rounded-full text-xs border border-violet-400/30 bg-violet-500/10 hover:bg-violet-500/20 text-violet-200 transition"
+                >
+                  移动到场次
+                </button>
+                <button
+                  onClick={batchSoftDelete}
+                  className="px-3 py-1.5 rounded-full text-xs border border-white/20 bg-white/5 hover:bg-white/10 transition"
+                >
+                  <Trash2 className="w-3.5 h-3.5 inline mr-1" /> 删除
+                </button>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* 媒体卡片网格 */}
+        {items.length === 0 ? (
+          <div className="py-16 text-center border border-dashed border-white/10 rounded-3xl bg-white/[0.02]">
+            {currentTab === 'trash' ? (
+              <>
+                <Trash2 className="w-10 h-10 mx-auto mb-3 text-slate-400" />
+                <p className="text-slate-300 mb-1">垃圾桶是空的</p>
+                <p className="text-xs text-slate-500">返回「未拍摄 / 已拍摄」查看素材</p>
+              </>
+            ) : (
+              <>
+                <FileVideo className="w-10 h-10 mx-auto mb-3 text-violet-300/60" />
+                <p className="text-slate-300 mb-1">暂无素材</p>
+                <p className="text-xs text-slate-500 mb-4">点击右上角「批量上传」上传图片或视频</p>
+                <button
+                  onClick={() => setShowUploadDialog(true)}
+                  className="px-4 py-2 rounded-full border border-violet-400/40 bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white text-sm font-medium hover:shadow-lg hover:shadow-violet-500/25 transition"
+                >
+                  <Upload className="w-4 h-4 inline mr-1.5" /> 批量上传
+                </button>
+              </>
+            )}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            {sortedItems.map((it, idx) => renderMediaCard(it, idx))}
+          </div>
+        )}
+      </div>
+
+      {/* 底部 Tab：未拍摄 / 已拍摄 / 垃圾桶 */}
+      <div className="fixed bottom-0 left-0 right-0 z-30 border-t border-white/10 bg-slate-900/90 backdrop-blur-xl">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-2.5 flex items-center gap-2">
+          {([
+            { key: 'pending', label: '未拍摄', count: stats.pending },
+            { key: 'done', label: '已拍摄', count: stats.done },
+            { key: 'trash', label: '垃圾桶', count: stats.trash }
+          ] as const).map(tab => {
+            const isActive = currentTab === tab.key;
+            return (
+              <button
+                key={tab.key}
+                onClick={() => { setCurrentTab(tab.key); setSelectedIds(new Set()); }}
+                className={`flex-1 py-2.5 rounded-2xl text-xs sm:text-sm font-medium transition ${isActive ? 'bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white shadow-lg shadow-violet-500/25' : 'text-slate-300 hover:bg-white/5'}`}
+              >
+                {tab.label} <span className={`ml-1 ${isActive ? 'text-white/90' : 'text-slate-400'}`}>({tab.count})</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ============ 弹窗 ============ */}
+
+      {/* 新建场次 */}
+      {showNewSceneModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => setShowNewSceneModal(false)}>
+          <div className="w-full max-w-sm rounded-3xl border border-white/10 bg-slate-900/95 backdrop-blur-xl p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-base font-semibold">新建场次</h2>
+              <button onClick={() => setShowNewSceneModal(false)} className="w-8 h-8 rounded-full hover:bg-white/10 flex items-center justify-center">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <input
+              type="text"
+              value={newSceneName}
+              onChange={(e) => setNewSceneName(e.target.value)}
+              placeholder="例如：场景 1 - 客厅"
+              className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:border-violet-400/50 outline-none text-sm transition"
+              onKeyDown={(e) => e.key === 'Enter' && createScene()}
+              autoFocus
+            />
+            <div className="flex items-center justify-end gap-2 mt-5">
+              <button onClick={() => setShowNewSceneModal(false)} className="px-3 py-2 rounded-xl text-sm text-slate-400 hover:text-white hover:bg-white/5 transition">取消</button>
+              <button
+                onClick={createScene}
+                disabled={!newSceneName.trim()}
+                className="px-4 py-2 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white text-sm font-medium disabled:opacity-40 transition"
+              >创建</button>
             </div>
           </div>
         </div>
       )}
+
+      {/* 重命名场次 */}
+      {showRenameSceneId !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => setShowRenameSceneId(null)}>
+          <div className="w-full max-w-sm rounded-3xl border border-white/10 bg-slate-900/95 backdrop-blur-xl p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-base font-semibold">重命名场次</h2>
+              <button onClick={() => setShowRenameSceneId(null)} className="w-8 h-8 rounded-full hover:bg-white/10 flex items-center justify-center">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <input
+              type="text"
+              value={renameSceneName}
+              onChange={(e) => setRenameSceneName(e.target.value)}
+              placeholder="新的场次名称"
+              className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:border-violet-400/50 outline-none text-sm transition"
+              onKeyDown={(e) => e.key === 'Enter' && renameScene()}
+              autoFocus
+            />
+            <div className="flex items-center justify-between mt-5">
+              <button
+                onClick={() => deleteScene(showRenameSceneId)}
+                className="px-3 py-2 rounded-xl text-sm text-red-300 hover:text-red-200 hover:bg-red-500/10 transition"
+              >
+                删除本场次
+              </button>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setShowRenameSceneId(null)} className="px-3 py-2 rounded-xl text-sm text-slate-400 hover:text-white hover:bg-white/5 transition">取消</button>
+                <button
+                  onClick={renameScene}
+                  disabled={!renameSceneName.trim()}
+                  className="px-4 py-2 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white text-sm font-medium disabled:opacity-40 transition"
+                >保存</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 移动到场次 */}
+      {showMoveModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => setShowMoveModal(false)}>
+          <div className="w-full max-w-sm rounded-3xl border border-white/10 bg-slate-900/95 backdrop-blur-xl p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-base font-semibold">移动到...（{selectedIds.size} 项）</h2>
+              <button onClick={() => setShowMoveModal(false)} className="w-8 h-8 rounded-full hover:bg-white/10 flex items-center justify-center">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="space-y-1.5 max-h-80 overflow-y-auto">
+              <button
+                onClick={() => batchMoveToScene(null)}
+                className={`w-full text-left px-4 py-2.5 rounded-xl text-sm border transition ${currentSceneId === null ? 'border-violet-400/40 bg-violet-500/15 text-violet-100' : 'border-white/10 hover:bg-white/5'}`}
+              >未分类</button>
+              {scenes.map(s => (
+                <button
+                  key={s.id}
+                  onClick={() => batchMoveToScene(s.id)}
+                  className={`w-full text-left px-4 py-2.5 rounded-xl text-sm border transition ${currentSceneId === s.id ? 'border-violet-400/40 bg-violet-500/15 text-violet-100' : 'border-white/10 hover:bg-white/5'}`}
+                >{s.name}</button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 批量上传弹窗 */}
+      {showUploadDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => {
+          if (uploadingFiles.every(f => f.status !== 'uploading')) setShowUploadDialog(false);
+        }}>
+          <div className="w-full max-w-xl rounded-3xl border border-white/10 bg-slate-900/95 backdrop-blur-xl p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-base font-semibold">批量上传</h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  当前场次：{currentSceneId === null ? '未分类' : (scenes.find(s => s.id === currentSceneId)?.name || '')}
+                </p>
+              </div>
+              <button onClick={() => {
+                if (uploadingFiles.every(f => f.status !== 'uploading')) setShowUploadDialog(false);
+              }} className="w-8 h-8 rounded-full hover:bg-white/10 flex items-center justify-center">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Tab 切换 */}
+            <div className="flex gap-2 mb-4 bg-white/5 p-1 rounded-2xl">
+              <button
+                onClick={() => setUploadTab('file')}
+                className={`flex-1 py-2 text-sm rounded-xl transition ${uploadTab === 'file' ? 'bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white' : 'text-slate-400 hover:text-white'}`}
+              >
+                <Upload className="w-4 h-4 inline mr-1.5" /> 选择文件
+              </button>
+              <button
+                onClick={() => setUploadTab('url')}
+                className={`flex-1 py-2 text-sm rounded-xl transition ${uploadTab === 'url' ? 'bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white' : 'text-slate-400 hover:text-white'}`}
+              >
+                <Link2 className="w-4 h-4 inline mr-1.5" /> 网络 URL
+              </button>
+            </div>
+
+            {uploadTab === 'file' ? (
+              <div>
+                <label className="block border-2 border-dashed border-white/15 hover:border-violet-400/40 rounded-2xl p-8 text-center cursor-pointer transition bg-white/[0.02]">
+                  <input
+                    type="file"
+                    multiple
+                    accept="image/*,video/*"
+                    className="hidden"
+                    onChange={(e) => { if (e.target.files) handleUploadFiles(e.target.files); e.target.value = ''; }}
+                  />
+                  <ImageIcon className="w-10 h-10 mx-auto mb-3 text-violet-300/60" />
+                  <p className="text-sm font-medium mb-1">点击选择图片或视频</p>
+                  <p className="text-xs text-slate-500">支持多选，非图片视频文件会被自动忽略</p>
+                </label>
+              </div>
+            ) : (
+              <div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={urlInputValue}
+                    onChange={(e) => setUrlInputValue(e.target.value)}
+                    placeholder="https://example.com/image.jpg 或 https://example.com/video.mp4"
+                    className="flex-1 px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:border-violet-400/50 outline-none text-sm transition"
+                    onKeyDown={(e) => e.key === 'Enter' && handleUploadFromUrl()}
+                  />
+                  <button
+                    onClick={handleUploadFromUrl}
+                    disabled={!urlInputValue.trim()}
+                    className="px-4 py-2.5 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white text-sm font-medium disabled:opacity-40 transition"
+                  >转存</button>
+                </div>
+                <p className="text-xs text-slate-500 mt-2">URL 必须是公开可访问资源链接，非登录页面</p>
+              </div>
+            )}
+
+            {/* 上传进度 */}
+            {uploadingFiles.length > 0 && (
+              <div className="mt-5 space-y-2">
+                {uploadingFiles.map(f => (
+                  <div key={f.id} className="flex items-center gap-3 p-3 rounded-xl bg-white/[0.03] border border-white/10">
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs text-slate-200 truncate">{f.name}</div>
+                      <div className="h-1.5 rounded-full bg-white/10 overflow-hidden mt-2">
+                        <div
+                          className={`h-full rounded-full transition-all ${f.status === 'error' ? 'bg-red-400' : f.status === 'done' ? 'bg-green-400' : 'bg-gradient-to-r from-violet-500 to-fuchsia-500'}`}
+                          style={{ width: `${f.progress}%` }}
+                        />
+                      </div>
+                    </div>
+                    <div className="text-xs text-right">
+                      {f.status === 'error' ? (
+                        <span className="text-red-300">{f.message || '失败'}</span>
+                      ) : (
+                        <span className="text-slate-300">{f.message || `${f.progress}%`}</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+                {/* 关闭按钮 */}
+                <div className="text-center pt-2">
+                  <button
+                    onClick={() => { setUploadingFiles([]); setShowUploadDialog(false); }}
+                    className="px-4 py-2 rounded-full text-xs text-slate-400 hover:text-white hover:bg-white/5 transition"
+                  >{uploadingFiles.every(f => f.status !== 'uploading') ? '关闭' : '完成后可点击关闭'}</button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 全屏查看 */}
+      {fullscreenItem && (
+        <div className="fixed inset-0 z-[80] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setFullscreenItem(null)}>
+          <button
+            onClick={() => setFullscreenItem(null)}
+            className="absolute top-4 right-4 w-10 h-10 rounded-full border border-white/25 bg-white/5 hover:bg-white/15 flex items-center justify-center text-white z-10"
+          >
+            <X className="w-5 h-5" />
+          </button>
+          <div className="max-w-6xl w-full max-h-full" onClick={e => e.stopPropagation()}>
+            {fullscreenItem.type === 'image' ? (
+              <img src={fullscreenItem.url} alt={fullscreenItem.title} className="mx-auto max-w-full max-h-[80vh] object-contain rounded-2xl" />
+            ) : (
+              <video src={fullscreenItem.url} controls autoPlay className="mx-auto max-w-full max-h-[80vh] rounded-2xl bg-black" playsInline />
+            )}
+            <p className="text-center text-sm text-slate-300 mt-4">{fullscreenItem.title}</p>
+          </div>
+        </div>
+      )}
+
+      {/* 微信分享提示 */}
+      <ShareHint
+        isVisible={shareHintVisible}
+        onClose={() => setShareHintVisible(false)}
+        mode={shareHintMode}
+      />
 
       {/* Toast */}
       {toast && (
-        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-full bg-white/90 text-gray-900 text-sm shadow-lg">
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[90] px-4 py-2.5 rounded-2xl bg-slate-800/95 border border-white/10 text-sm shadow-xl">
+          <CheckCircle2 className="w-4 h-4 inline mr-2 text-green-400" />
           {toast}
         </div>
       )}

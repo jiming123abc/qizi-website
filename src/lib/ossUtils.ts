@@ -426,3 +426,170 @@ export async function uploadVideoWithBrowserCompression(
     xhr.send(compressedFile);
   });
 }
+
+// ================ video2 专用上传函数 ================
+
+// 图片上传到 imges2 文件夹（通过后端 API 自动压缩）
+export async function uploadVideo2Image(
+  file: File,
+  options?: {
+    projectId?: number;
+    sceneId?: number;
+    reference?: boolean;
+    title?: string;
+    onProgress?: (p: UploadProgress) => void;
+  }
+): Promise<UploadResult & { id?: number; filename?: string }> {
+  options?.onProgress?.({ phase: 'uploading', progress: 10, message: '上传图片中...' });
+
+  const formData = new FormData();
+  formData.append('file', file);
+  if (options?.projectId) formData.append('projectId', String(options.projectId));
+  if (options?.sceneId) formData.append('sceneId', String(options.sceneId));
+  if (options?.reference) formData.append('reference', '1');
+  if (options?.title) formData.append('title', options.title);
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/video2/upload/image`, {
+      method: 'POST',
+      body: formData
+    });
+
+    options?.onProgress?.({ phase: 'uploading', progress: 80, message: '处理中...' });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`上传失败: ${errText}`);
+    }
+
+    const result = await response.json();
+    options?.onProgress?.({ phase: 'done', progress: 100, message: '上传完成' });
+    return {
+      url: result.url,
+      compressed: result.compressed || false,
+      id: result.id,
+      filename: result.filename
+    };
+  } catch (err) {
+    options?.onProgress?.({ phase: 'idle', progress: 0, message: '上传失败' });
+    throw err;
+  }
+}
+
+// 视频上传到 video2 文件夹（通过后端 API，支持压缩+轮询进度）
+export async function uploadVideo2Video(
+  file: File,
+  options?: {
+    projectId?: number;
+    sceneId?: number;
+    reference?: boolean;
+    title?: string;
+    compress?: boolean;
+    onProgress?: (p: UploadProgress) => void;
+  }
+): Promise<UploadResult & { id?: number; filename?: string }> {
+  options?.onProgress?.({ phase: 'uploading', progress: 5, message: '开始上传视频...' });
+
+  const formData = new FormData();
+  formData.append('file', file);
+  if (options?.projectId) formData.append('projectId', String(options.projectId));
+  if (options?.sceneId) formData.append('sceneId', String(options.sceneId));
+  if (options?.reference) formData.append('reference', '1');
+  if (options?.title) formData.append('title', options.title);
+
+  try {
+    // 第一步：上传并启动任务
+    const taskResp = await fetch(
+      `${API_BASE_URL}/api/video2/upload/video${options?.compress ? '?compress=true' : ''}`,
+      { method: 'POST', body: formData }
+    );
+    if (!taskResp.ok) throw new Error(`上传失败: HTTP ${taskResp.status}`);
+    const { taskId } = await taskResp.json();
+    options?.onProgress?.({ phase: 'uploading', progress: 20, message: '文件已提交，等待处理...' });
+
+    // 第二步：轮询进度
+    let attempts = 0;
+    const maxAttempts = 180; // 最多 3 分钟
+    while (attempts < maxAttempts) {
+      await new Promise(r => setTimeout(r, 1000));
+      const statusResp = await fetch(`${API_BASE_URL}/api/video2/upload/status/${taskId}`);
+      if (!statusResp.ok) throw new Error('状态查询失败');
+      const status = await statusResp.json();
+
+      if (status.status === 'done') {
+        options?.onProgress?.({ phase: 'done', progress: 100, message: '上传完成' });
+        return {
+          url: status.result.url,
+          compressed: status.result.compressed || false,
+          id: status.result.id,
+          filename: status.result.fileName
+        };
+      }
+      if (status.status === 'error') {
+        throw new Error(status.error || '上传失败');
+      }
+      // 渐进式进度
+      const progress = Math.min(90, 20 + Math.floor((attempts / maxAttempts) * 70));
+      options?.onProgress?.({ phase: status.status === 'processing' ? 'compressing' : 'uploading', progress, message: status.message || '处理中...' });
+      attempts++;
+    }
+    throw new Error('上传超时');
+  } catch (err) {
+    options?.onProgress?.({ phase: 'idle', progress: 0, message: String(err) });
+    throw err;
+  }
+}
+
+// 从网络 URL 转存图片/视频到 OSS
+export async function uploadVideo2FromUrl(
+  url: string,
+  options?: {
+    type?: 'image' | 'video';
+    projectId?: number;
+    sceneId?: number;
+    reference?: boolean;
+    title?: string;
+    onProgress?: (p: UploadProgress) => void;
+  }
+): Promise<{ url: string; id?: number; filename?: string; type: 'image' | 'video' }> {
+  options?.onProgress?.({ phase: 'uploading', progress: 30, message: '正在从 URL 抓取文件...' });
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/video2/upload/from-url`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        url,
+        type: options?.type,
+        projectId: options?.projectId,
+        sceneId: options?.sceneId,
+        reference: options?.reference ? 1 : 0,
+        title: options?.title
+      })
+    });
+    if (!response.ok) throw new Error(`URL 转存失败: HTTP ${response.status}`);
+    const result = await response.json();
+    options?.onProgress?.({ phase: 'done', progress: 100, message: '转存完成' });
+    return {
+      url: result.url,
+      id: result.id,
+      filename: result.filename,
+      type: result.type || (options?.type || 'video')
+    };
+  } catch (err) {
+    options?.onProgress?.({ phase: 'idle', progress: 0, message: String(err) });
+    throw err;
+  }
+}
+
+// 文件类型检测：判断某个 File 是图片、视频，还是不支持
+export function detectFileType(file: File): { supported: boolean; type: 'image' | 'video' | 'unknown'; mime: string } {
+  const mime = file.type;
+  if (ALLOWED_MIME_TYPES.image.includes(mime) || mime.startsWith('image/')) {
+    return { supported: true, type: 'image', mime };
+  }
+  if (ALLOWED_MIME_TYPES.video.includes(mime) || mime.startsWith('video/')) {
+    return { supported: true, type: 'video', mime };
+  }
+  return { supported: false, type: 'unknown', mime };
+}

@@ -868,6 +868,7 @@ app.post('/api/oss/presign', async (req, res) => {
 // 使用内存存储上传进度（生产环境可以使用Redis）
 const uploadProgressStore = new Map();
 const videoTasks = new Map(); // 任务id -> 状态对象
+const video2VideoTasks = new Map(); // video2 视频上传任务id -> 状态对象
 
 // 视频上传接口 (异步模式)
 app.post('/api/upload/video', upload.single('file'), async (req, res) => {
@@ -2598,10 +2599,10 @@ app.get('/api/video2/stats', async (req, res) => {
   }
 });
 
-// POST /api/video2/add —— 新增视频（支持 projectId / sceneId）
+// POST /api/video2/add —— 新增（支持 type=image|video / coverUrl / reference / projectId / sceneId）
 app.post('/api/video2/add', express.json({ limit: '1mb' }), async (req, res) => {
   try {
-    const { title, filename, url, size, duration, projectId, sceneId } = req.body;
+    const { title, filename, url, size, duration, projectId, sceneId, type, coverUrl, reference } = req.body;
     if (!title || !filename || !url) {
       return res.status(400).json({ success: false, message: '缺少必要参数: title, filename, url' });
     }
@@ -2609,13 +2610,16 @@ app.post('/api/video2/add', express.json({ limit: '1mb' }), async (req, res) => 
       title, filename, url, size, duration,
       status: 'pending',
       projectId: projectId !== undefined ? parseInt(projectId) : null,
-      sceneId: sceneId !== undefined ? parseInt(sceneId) : null
+      sceneId: sceneId !== undefined ? parseInt(sceneId) : null,
+      type: type || 'video',
+      coverUrl: coverUrl || null,
+      reference: reference ? 1 : 0
     });
-    console.log(`[video2] 新增视频: ${title}`);
+    console.log(`[video2] 新增${type === 'image' ? '图片' : '视频'}: ${title}`);
     res.json({ success: true, data: item });
 
-    // 异步 OSS 截图预热（保持原有逻辑）
-    if (url && (url.includes('aliyuncs.com') || url.includes('qiziwenhua.top'))) {
+    // 视频的异步 OSS 截图预热（图片跳过）
+    if ((!type || type === 'video') && url && (url.includes('aliyuncs.com') || url.includes('qiziwenhua.top'))) {
       const posterUrl = url + '?x-oss-process=video/snapshot,t_1000,f_jpg,w_800,m_fast';
       setTimeout(() => {
         fetch(posterUrl, { method: 'GET', signal: AbortSignal.timeout(15000) })
@@ -2627,7 +2631,7 @@ app.post('/api/video2/add', express.json({ limit: '1mb' }), async (req, res) => 
       }, 500);
     }
   } catch (error) {
-    console.error('[video2] 新增视频失败:', error.message);
+    console.error('[video2] 新增失败:', error.message);
     res.status(500).json({ success: false, message: error.message });
   }
 });
@@ -2919,6 +2923,311 @@ app.delete('/api/video2/scenes/:id', async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     console.error('[video2] 删除场次失败:', error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// ==================== video2 上传与封面 API ====================
+
+// POST /api/video2/upload/image —— 上传图片至 imges2 文件夹，自动压缩
+app.post('/api/video2/upload/image', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: '请上传文件' });
+    if (!validateFileSize(req.file.size, 'image')) {
+      return res.status(400).json({ error: `图片不能超过 ${FILE_SIZE_LIMITS.image / (1024*1024)}MB` });
+    }
+    const fileName = `${Date.now()}-${Math.random().toString(36).substr(2, 8)}-${req.file.originalname}`;
+    const filePath = req.file.path;
+    const originalSizeKB = (req.file.size / 1024).toFixed(2);
+    let compressed = false;
+    let fileBuffer = fs.readFileSync(filePath);
+    if (req.file.size > 300 * 1024) {
+      try {
+        fileBuffer = await compressImage(fileBuffer, 300);
+        compressed = true;
+      } catch (e) {
+        console.warn('[video2] 图片压缩失败，使用原图:', e.message);
+      }
+    }
+    let fileUrl = '';
+    const forceLocalStorage = req.query.forceLocal === 'true';
+    if (isOSSConfigured && !forceLocalStorage && ossClient) {
+      try {
+        const ossKey = `imges2/${fileName}`;
+        const result = await ossClient.put(ossKey, fileBuffer);
+        fileUrl = result.url;
+        try { fs.unlinkSync(filePath); } catch (e) {}
+        console.log(`[video2] 图片 OSS 上传成功 (imges2): ${fileName}`);
+      } catch (ossError) {
+        console.warn('[video2] OSS 上传失败:', ossError.message);
+        try { fs.unlinkSync(filePath); } catch (e) {}
+        return res.status(500).json({ error: 'OSS 上传失败', ossError: true });
+      }
+    } else {
+      if (compressed) fs.writeFileSync(filePath, fileBuffer);
+      fileUrl = `/uploads/${fileName}`;
+      console.log(`[video2] 图片本地上传: ${fileName}`);
+    }
+    // 同时写入 videos 表（type=image）
+    const { projectId, sceneId, reference } = req.body || {};
+    const title = req.body && req.body.title ? req.body.title : fileName;
+    const item = await db.video2Items.create({
+      title, filename: fileName, url: fileUrl,
+      size: req.file.size,
+      status: 'pending',
+      projectId: projectId ? parseInt(projectId) : null,
+      sceneId: sceneId ? parseInt(sceneId) : null,
+      type: 'image',
+      reference: reference ? 1 : 0
+    });
+    res.json({ success: true, url: fileUrl, filename: fileName, compressed, size: originalSizeKB, id: item.id });
+  } catch (error) {
+    console.error('[video2] 图片上传失败:', error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// POST /api/video2/upload/video —— 上传视频至 video2 文件夹，支持异步压缩
+app.post('/api/video2/upload/video', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: '请上传文件' });
+    if (!validateFileSize(req.file.size, 'video')) {
+      return res.status(400).json({ error: `视频不能超过 ${FILE_SIZE_LIMITS.video / (1024*1024)}MB` });
+    }
+    const fileName = `${Date.now()}-${Math.random().toString(36).substr(2, 8)}-${req.file.originalname}`;
+    const filePath = req.file.path;
+    const shouldCompress = req.query.compress === 'true';
+    const forceLocalStorage = req.query.forceLocal === 'true';
+    const taskId = 'v2-' + Date.now() + '-' + Math.random().toString(36).substr(2, 8);
+
+    video2VideoTasks.set(taskId, {
+      status: 'processing', progress: 0, compressProgress: 0, uploadProgress: 0,
+      message: '上传中...', result: null, error: null,
+      filePath, fileName, shouldCompress, forceLocalStorage,
+      projectId: req.body && req.body.projectId ? parseInt(req.body.projectId) : null,
+      sceneId: req.body && req.body.sceneId ? parseInt(req.body.sceneId) : null,
+      reference: req.body && req.body.reference ? 1 : 0,
+      createdAt: Date.now()
+    });
+    res.json({ taskId, status: 'queued' });
+
+    // 后台处理
+    (async () => {
+      try {
+        const task = video2VideoTasks.get(taskId);
+        if (!task) return;
+        let fileUrl = '';
+        let compressed = false;
+        let fileBufferToUpload = null;
+
+        if (task.shouldCompress) {
+          try {
+            const fileBuffer = fs.readFileSync(filePath);
+            const bitrate = await getVideoBitrate(fileBuffer);
+            if (bitrate && bitrate > 3000) {
+              task.message = '正在压缩视频...';
+              video2VideoTasks.set(taskId, task);
+              const compressedBuffer = await compressVideo(fileBuffer, 3000);
+              if (compressedBuffer.length < fileBuffer.length) {
+                fileBufferToUpload = compressedBuffer;
+                compressed = true;
+                task.compressProgress = 100;
+              } else {
+                fileBufferToUpload = fileBuffer;
+              }
+            } else {
+              fileBufferToUpload = fileBuffer;
+            }
+          } catch (e) {
+            console.warn('[video2] 视频压缩失败，使用原始文件:', e.message);
+          }
+        }
+
+        task.uploadProgress = 50;
+        task.message = '正在上传...';
+        video2VideoTasks.set(taskId, task);
+
+        if (isOSSConfigured && !task.forceLocalStorage && ossClient) {
+          try {
+            const ossKey = `video2/${task.fileName}`;
+            const result = fileBufferToUpload
+              ? await ossClient.put(ossKey, fileBufferToUpload)
+              : await ossClient.put(ossKey, filePath);
+            fileUrl = result.url;
+            try { fs.unlinkSync(filePath); } catch (e) {}
+          } catch (e) {
+            console.warn('[video2] OSS 上传失败:', e.message);
+            throw new Error('OSS 上传失败');
+          }
+        } else {
+          fileUrl = `/uploads/${task.fileName}`;
+        }
+
+        task.uploadProgress = 100;
+        task.status = 'done';
+        task.message = '上传成功';
+        task.result = { url: fileUrl, compressed, fileName: task.fileName };
+
+        // 写库
+        const item = await db.video2Items.create({
+          title: req.body && req.body.title ? req.body.title : task.fileName,
+          filename: task.fileName,
+          url: fileUrl,
+          size: req.file.size,
+          status: 'pending',
+          projectId: task.projectId,
+          sceneId: task.sceneId,
+          type: 'video',
+          reference: task.reference
+        });
+        task.result.id = item.id;
+        video2VideoTasks.set(taskId, task);
+        console.log(`[video2] 视频上传完成: ${task.fileName} (compressed=${compressed})`);
+      } catch (err) {
+        const task = video2VideoTasks.get(taskId);
+        if (task) {
+          task.status = 'error';
+          task.error = err.message;
+          task.message = '上传失败';
+          video2VideoTasks.set(taskId, task);
+        }
+        console.error('[video2] 视频上传处理失败:', err.message);
+      }
+    })();
+  } catch (error) {
+    console.error('[video2] 视频上传接口失败:', error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/video2/upload/status/:taskId —— 视频上传状态查询
+app.get('/api/video2/upload/status/:taskId', async (req, res) => {
+  const task = video2VideoTasks.get(req.params.taskId);
+  if (!task) return res.status(404).json({ status: 'not_found' });
+  res.json({
+    status: task.status,
+    progress: task.progress,
+    message: task.message,
+    result: task.result,
+    error: task.error
+  });
+});
+
+// POST /api/video2/upload/from-url —— 从网络 URL 抓取文件并上传到 OSS
+app.post('/api/video2/upload/from-url', express.json({ limit: '1mb' }), async (req, res) => {
+  try {
+    const { url, type, projectId, sceneId, title, reference } = req.body;
+    if (!url) return res.status(400).json({ success: false, message: '缺少 url' });
+
+    const actualType = type === 'image' ? 'image' : 'video';
+    const folder = actualType === 'image' ? 'imges2' : 'video2';
+    const ext = (url.split('.').pop() || '').split('?')[0] || (actualType === 'image' ? 'jpg' : 'mp4');
+    const fileName = `${Date.now()}-${Math.random().toString(36).substr(2, 8)}.${ext}`;
+
+    let fileUrl = '';
+    if (isOSSConfigured && ossClient) {
+      // 先 fetch 远程内容再上传到 OSS
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`无法下载远程文件: HTTP ${response.status}`);
+      const arrayBuffer = await response.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+      const ossKey = `${folder}/${fileName}`;
+      const result = await ossClient.put(ossKey, buffer);
+      fileUrl = result.url;
+      console.log(`[video2] URL 转存成功: ${url} -> ${ossKey}`);
+    } else {
+      fileUrl = url; // OSS 未配置时直接使用原 URL
+    }
+
+    // 写库
+    const item = await db.video2Items.create({
+      title: title || fileName,
+      filename: fileName,
+      url: fileUrl,
+      status: 'pending',
+      projectId: projectId ? parseInt(projectId) : null,
+      sceneId: sceneId ? parseInt(sceneId) : null,
+      type: actualType,
+      reference: reference ? 1 : 0
+    });
+    res.json({ success: true, url: fileUrl, id: item.id, filename: fileName, type: actualType });
+  } catch (error) {
+    console.error('[video2] URL 转存失败:', error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// PUT /api/video2/projects/:id/cover —— 设置/更新项目封面
+app.put('/api/video2/projects/:id/cover', express.json({ limit: '1mb' }), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const { coverUrl } = req.body;
+    if (!coverUrl) return res.status(400).json({ success: false, message: 'coverUrl 不能为空' });
+    const project = await db.video2Projects.getById(id);
+    if (!project) return res.status(404).json({ success: false, message: '项目不存在' });
+    await db.video2Projects.update(id, { coverUrl });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('[video2] 更新项目封面失败:', error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// POST /api/video2/projects/:id/reference —— 新增项目参考文件
+//   body: { title, type, url, filename } —— 也可以传入 upload taskId (result.url) 直接写库
+app.post('/api/video2/projects/:id/reference', express.json({ limit: '1mb' }), async (req, res) => {
+  try {
+    const projectId = parseInt(req.params.id);
+    const { title, type, url, filename } = req.body;
+    if (!url) return res.status(400).json({ success: false, message: '缺少 url' });
+    const actualType = type === 'image' ? 'image' : 'video';
+    const item = await db.video2Items.create({
+      title: title || (filename || '参考文件'),
+      filename: filename || title || 'ref',
+      url,
+      status: 'pending',
+      projectId,
+      sceneId: null,
+      type: actualType,
+      reference: 1
+    });
+    res.json({ success: true, data: item });
+  } catch (error) {
+    console.error('[video2] 添加参考文件失败:', error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/video2/projects/:id/references —— 获取项目参考文件列表
+app.get('/api/video2/projects/:id/references', async (req, res) => {
+  try {
+    const projectId = parseInt(req.params.id);
+    const items = await db.video2Items.getByFilter({ projectId, deleted: 0, reference: 1 });
+    res.json({ success: true, data: items });
+  } catch (error) {
+    console.error('[video2] 获取参考文件失败:', error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// PUT /api/video2/videos/:id/set-cover —— 将某条内容设为项目封面
+app.put('/api/video2/videos/:id/set-cover', express.json({ limit: '1mb' }), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const item = await db.video2Items.getById(id);
+    if (!item || !item.projectId) return res.status(404).json({ success: false, message: '记录不存在' });
+    // 使用该记录的 url 作为封面（视频的话加 snapshot 参数，图片直接用）
+    let coverUrl = item.url;
+    if (item.type !== 'image' && coverUrl && (coverUrl.includes('aliyuncs.com') || coverUrl.includes('qiziwenhua.top'))) {
+      coverUrl = coverUrl + '?x-oss-process=video/snapshot,t_1000,f_jpg,w_800,m_fast';
+    }
+    const ok = await db.video2Items.setCover(item.projectId, id);
+    if (ok) {
+      await db.video2Projects.update(item.projectId, { coverUrl });
+    }
+    res.json({ success: true, coverUrl });
+  } catch (error) {
+    console.error('[video2] 设置封面失败:', error.message);
     res.status(500).json({ success: false, message: error.message });
   }
 });
