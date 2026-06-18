@@ -220,6 +220,36 @@ if (isOSSConfigured) {
   });
 }
 
+// 从视频 URL 中提取 OSS key 并删除文件
+async function deleteOssFile(url) {
+  if (!url || !ossClient) return;
+  try {
+    let key = '';
+    // 兼容阿里云 OSS 格式: https://bucket.region.aliyuncs.com/path/key
+    const match = url.match(/aliyuncs\.com\/(.+)$/);
+    if (match) {
+      key = match[1];
+    } else {
+      // 其他格式，取最后一个 / 后的部分
+      const lastSlash = url.lastIndexOf('/');
+      if (lastSlash !== -1) key = url.substring(lastSlash + 1);
+    }
+    if (key) {
+      await ossClient.delete(key);
+      console.log('[OSS] 已删除文件:', key);
+    }
+  } catch (e) {
+    console.warn('[OSS] 删除文件失败（可能不存在）:', url, e.message);
+  }
+}
+
+// 批量删除 OSS 文件
+async function deleteOssFiles(urls) {
+  for (const url of (urls || [])) {
+    await deleteOssFile(url);
+  }
+}
+
 // 微信签名缓存
 let wechatTicketCache = {
   ticket: '',
@@ -2528,11 +2558,18 @@ app.post('/api/ai/generate-icon', async (req, res) => {
   }
 });
 
-// ==================== video2 视频片段管理 API ====================
+// ==================== video2 视频片段管理 API（扩展版） ====================
 
+// GET /api/video2/list —— 支持 projectId / sceneId / status / deleted 筛选
 app.get('/api/video2/list', async (req, res) => {
   try {
-    const items = await db.video2Items.getAll();
+    const { projectId, sceneId, status, deleted } = req.query;
+    const items = await db.video2Items.getByFilter({
+      projectId: projectId !== undefined ? parseInt(projectId) : undefined,
+      sceneId: sceneId !== undefined ? (sceneId === 'null' ? null : parseInt(sceneId)) : undefined,
+      status,
+      deleted: deleted !== undefined ? parseInt(deleted) : 0  // 默认只查非删除
+    });
     res.json({ success: true, data: items });
   } catch (error) {
     console.error('[video2] 获取列表失败:', error.message);
@@ -2540,9 +2577,20 @@ app.get('/api/video2/list', async (req, res) => {
   }
 });
 
+// GET /api/video2/stats —— 包含 pending / done / trash 数量
 app.get('/api/video2/stats', async (req, res) => {
   try {
-    const stats = await db.video2Items.getStats();
+    const { projectId } = req.query;
+    let stats;
+    if (projectId !== undefined) {
+      // 按项目统计
+      const pending = await db.video2Items.getByFilter({ projectId: parseInt(projectId), status: 'pending', deleted: 0 });
+      const done = await db.video2Items.getByFilter({ projectId: parseInt(projectId), status: 'done', deleted: 0 });
+      const trash = await db.video2Items.getByFilter({ projectId: parseInt(projectId), deleted: 1 });
+      stats = { pending: pending.length, done: done.length, trash: trash.length, total: pending.length + done.length };
+    } else {
+      stats = await db.video2Items.getStats();
+    }
     res.json({ success: true, data: stats });
   } catch (error) {
     console.error('[video2] 获取统计失败:', error.message);
@@ -2550,38 +2598,32 @@ app.get('/api/video2/stats', async (req, res) => {
   }
 });
 
+// POST /api/video2/add —— 新增视频（支持 projectId / sceneId）
 app.post('/api/video2/add', express.json({ limit: '1mb' }), async (req, res) => {
   try {
-    const { title, filename, url, size, duration } = req.body;
+    const { title, filename, url, size, duration, projectId, sceneId } = req.body;
     if (!title || !filename || !url) {
       return res.status(400).json({ success: false, message: '缺少必要参数: title, filename, url' });
     }
-    const item = await db.video2Items.create({ title, filename, url, size, duration, status: 'pending' });
+    const item = await db.video2Items.create({
+      title, filename, url, size, duration,
+      status: 'pending',
+      projectId: projectId !== undefined ? parseInt(projectId) : null,
+      sceneId: sceneId !== undefined ? parseInt(sceneId) : null
+    });
     console.log(`[video2] 新增视频: ${title}`);
     res.json({ success: true, data: item });
 
-    // 异步触发 OSS 截图缓存：不阻塞响应，后台执行。
-    // OSS 的视频处理是异步的，首次访问才会触发截图。
-    // 这里主动请求一次截图 URL，这样用户打开页面时就能直接命中缓存。
+    // 异步 OSS 截图预热（保持原有逻辑）
     if (url && (url.includes('aliyuncs.com') || url.includes('qiziwenhua.top'))) {
       const posterUrl = url + '?x-oss-process=video/snapshot,t_1000,f_jpg,w_800,m_fast';
-      // 延迟 500ms 再请求，确保 OSS 已完成视频文件写入
       setTimeout(() => {
-        try {
-          fetch(posterUrl, { method: 'GET', signal: AbortSignal.timeout(15000) })
-            .then((r) => {
-              if (r.ok) {
-                console.log(`[video2] 截图预热成功: ${title}`);
-              } else {
-                console.log(`[video2] 截图预热 HTTP ${r.status}: ${title}（稍后自动重试）`);
-              }
-            })
-            .catch((e) => {
-              console.log(`[video2] 截图预热忽略: ${e.message}`);
-            });
-        } catch (e) {
-          console.log(`[video2] 截图预热启动忽略: ${e.message}`);
-        }
+        fetch(posterUrl, { method: 'GET', signal: AbortSignal.timeout(15000) })
+          .then((r) => {
+            if (r.ok) console.log(`[video2] 截图预热成功: ${title}`);
+            else console.log(`[video2] 截图预热 HTTP ${r.status}: ${title}`);
+          })
+          .catch((e) => console.log(`[video2] 截图预热忽略: ${e.message}`));
       }, 500);
     }
   } catch (error) {
@@ -2590,6 +2632,7 @@ app.post('/api/video2/add', express.json({ limit: '1mb' }), async (req, res) => 
   }
 });
 
+// PUT /api/video2/:id/status —— 更新状态
 app.put('/api/video2/:id/status', express.json({ limit: '1mb' }), async (req, res) => {
   try {
     const id = parseInt(req.params.id);
@@ -2598,9 +2641,7 @@ app.put('/api/video2/:id/status', express.json({ limit: '1mb' }), async (req, re
       return res.status(400).json({ success: false, message: 'status 只能是 pending 或 done' });
     }
     const ok = await db.video2Items.updateStatus(id, status);
-    if (!ok) {
-      return res.status(404).json({ success: false, message: '视频不存在' });
-    }
+    if (!ok) return res.status(404).json({ success: false, message: '视频不存在' });
     res.json({ success: true });
   } catch (error) {
     console.error('[video2] 更新状态失败:', error.message);
@@ -2608,20 +2649,97 @@ app.put('/api/video2/:id/status', express.json({ limit: '1mb' }), async (req, re
   }
 });
 
+// DELETE /api/video2/:id —— 软删除（移入垃圾桶）
 app.delete('/api/video2/:id', async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const ok = await db.video2Items.delete(id);
-    if (!ok) {
-      return res.status(404).json({ success: false, message: '视频不存在' });
-    }
+    const ok = await db.video2Items.softDelete(id);
+    if (!ok) return res.status(404).json({ success: false, message: '视频不存在' });
+    console.log(`[video2] 视频 ID ${id} 已移入垃圾桶`);
     res.json({ success: true });
   } catch (error) {
-    console.error('[video2] 删除失败:', error.message);
+    console.error('[video2] 软删除失败:', error.message);
     res.status(500).json({ success: false, message: error.message });
   }
 });
 
+// DELETE /api/video2/videos/:id/hard —— 彻底删除（OSS + DB）
+app.delete('/api/video2/videos/:id/hard', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const item = await db.video2Items.getById(id);
+    if (!item) return res.status(404).json({ success: false, message: '视频不存在' });
+    await db.video2Items.hardDelete(id);
+    await deleteOssFile(item.url);
+    console.log(`[video2] 视频 ID ${id} 已彻底删除`);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('[video2] 彻底删除失败:', error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// POST /api/video2/videos/:id/restore —— 从垃圾桶恢复
+app.post('/api/video2/videos/:id/restore', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const ok = await db.video2Items.restore(id);
+    if (!ok) return res.status(404).json({ success: false, message: '视频不存在' });
+    console.log(`[video2] 视频 ID ${id} 已从垃圾桶恢复`);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('[video2] 恢复失败:', error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// PUT /api/video2/videos/:id/title —— 修改标题
+app.put('/api/video2/videos/:id/title', express.json({ limit: '1mb' }), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const { title } = req.body;
+    if (!title || !title.trim()) {
+      return res.status(400).json({ success: false, message: '标题不能为空' });
+    }
+    const ok = await db.video2Items.updateTitle(id, title.trim());
+    if (!ok) return res.status(404).json({ success: false, message: '视频不存在' });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('[video2] 修改标题失败:', error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// PUT /api/video2/videos/batch-update —— 批量操作
+app.put('/api/video2/videos/batch-update', express.json({ limit: '1mb' }), async (req, res) => {
+  try {
+    const { videoIds, operation, sceneId } = req.body;
+    if (!Array.isArray(videoIds) || videoIds.length === 0) {
+      return res.status(400).json({ success: false, message: 'videoIds 应为非空数组' });
+    }
+    const ids = videoIds.map(Number);
+    let changes = 0;
+    if (operation === 'softDelete') {
+      changes = await db.video2Items.batchSoftDelete(ids);
+    } else if (operation === 'restore') {
+      changes = await db.video2Items.batchRestore(ids);
+    } else if (operation === 'hardDelete') {
+      const urls = await db.video2Items.batchHardDelete(ids);
+      await deleteOssFiles(urls);
+      changes = ids.length;
+    } else if (operation === 'changeScene') {
+      changes = await db.video2Items.batchChangeScene(ids, sceneId !== undefined && sceneId !== null ? parseInt(sceneId) : null);
+    } else {
+      return res.status(400).json({ success: false, message: '不支持的操作: ' + operation });
+    }
+    res.json({ success: true, changes });
+  } catch (error) {
+    console.error('[video2] 批量操作失败:', error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// PUT /api/video2/sort —— 更新排序
 app.put('/api/video2/sort', express.json({ limit: '1mb' }), async (req, res) => {
   try {
     const { orders } = req.body;
@@ -2629,12 +2747,8 @@ app.put('/api/video2/sort', express.json({ limit: '1mb' }), async (req, res) => 
       return res.status(400).json({ success: false, message: '参数 orders 应为非空数组' });
     }
     const normalized = orders
-      .filter(function(item) {
-        return item && typeof item.id === 'number' && typeof item.sortOrder === 'number';
-      })
-      .map(function(item) {
-        return { id: item.id, sortOrder: item.sortOrder };
-      });
+      .filter(function(item) { return item && typeof item.id === 'number' && typeof item.sortOrder === 'number'; })
+      .map(function(item) { return { id: item.id, sortOrder: item.sortOrder }; });
     if (normalized.length === 0) {
       return res.status(400).json({ success: false, message: '参数 orders 无效' });
     }
@@ -2646,19 +2760,230 @@ app.put('/api/video2/sort', express.json({ limit: '1mb' }), async (req, res) => 
   }
 });
 
+// ==================== Projects API ====================
+
+// GET /api/video2/projects —— 全部项目（含视频数 + 占用空间）
+app.get('/api/video2/projects', async (req, res) => {
+  try {
+    const projects = await db.video2Projects.getAll();
+    const origin = `${req.protocol}://${req.get('host')}`;
+    res.json({ success: true, data: projects.map(p => ({
+      ...p,
+      shareUrl: `${origin}/share/video2/project/${p.id}`
+    })) });
+  } catch (error) {
+    console.error('[video2] 获取项目列表失败:', error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// POST /api/video2/projects —— 新建项目
+app.post('/api/video2/projects', express.json({ limit: '1mb' }), async (req, res) => {
+  try {
+    const { name, description } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ success: false, message: '项目名称不能为空' });
+    }
+    const project = await db.video2Projects.create({ name: name.trim(), description: description || '' });
+    console.log(`[video2] 新建项目: ${name}`);
+    res.json({ success: true, data: project });
+  } catch (error) {
+    console.error('[video2] 新建项目失败:', error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// PUT /api/video2/projects/:id —— 更新项目
+app.put('/api/video2/projects/:id', express.json({ limit: '1mb' }), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const { name, description, coverUrl } = req.body;
+    const existing = await db.video2Projects.getById(id);
+    if (!existing) return res.status(404).json({ success: false, message: '项目不存在' });
+    await db.video2Projects.update(id, {
+      name: name !== undefined ? name.trim() : undefined,
+      description: description !== undefined ? description : undefined,
+      coverUrl: coverUrl !== undefined ? coverUrl : undefined
+    });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('[video2] 更新项目失败:', error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// PUT /api/video2/projects/sort —— 更新项目排序
+app.put('/api/video2/projects/sort', express.json({ limit: '1mb' }), async (req, res) => {
+  try {
+    const { orders } = req.body;
+    if (!Array.isArray(orders)) return res.status(400).json({ success: false, message: 'orders 应为数组' });
+    await db.video2Projects.updateSort(orders.filter(o => o && typeof o.id === 'number' && typeof o.sortOrder === 'number'));
+    res.json({ success: true });
+  } catch (error) {
+    console.error('[video2] 更新项目排序失败:', error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// DELETE /api/video2/projects/:id —— 删除项目（含所有视频 + OSS 清理）
+app.delete('/api/video2/projects/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const existing = await db.video2Projects.getById(id);
+    if (!existing) return res.status(404).json({ success: false, message: '项目不存在' });
+    // 获取该项目下所有视频的 URL 用于清理 OSS
+    const videos = await db.video2Items.getByFilter({ projectId: id });
+    const urls = videos.map(v => v.url);
+    // 删除数据库记录（会级联删除 scenes）
+    await db.video2Projects.delete(id);
+    // 清理 OSS 文件
+    await deleteOssFiles(urls);
+    console.log(`[video2] 项目 ID ${id} 已删除，含 ${urls.length} 个视频`);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('[video2] 删除项目失败:', error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// ==================== Scenes API ====================
+
+// GET /api/video2/projects/:projectId/scenes —— 场次列表（含视频数）
+app.get('/api/video2/projects/:projectId/scenes', async (req, res) => {
+  try {
+    const projectId = parseInt(req.params.projectId);
+    const project = await db.video2Projects.getById(projectId);
+    if (!project) return res.status(404).json({ success: false, message: '项目不存在' });
+    const scenes = await db.video2Scenes.getByProjectId(projectId);
+    res.json({ success: true, data: scenes });
+  } catch (error) {
+    console.error('[video2] 获取场次列表失败:', error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// POST /api/video2/projects/:projectId/scenes —— 新建场次
+app.post('/api/video2/projects/:projectId/scenes', express.json({ limit: '1mb' }), async (req, res) => {
+  try {
+    const projectId = parseInt(req.params.projectId);
+    const { name } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ success: false, message: '场次名称不能为空' });
+    }
+    const project = await db.video2Projects.getById(projectId);
+    if (!project) return res.status(404).json({ success: false, message: '项目不存在' });
+    const scene = await db.video2Scenes.create({ projectId, name: name.trim() });
+    console.log(`[video2] 新建场次: ${name}`);
+    res.json({ success: true, data: scene });
+  } catch (error) {
+    console.error('[video2] 新建场次失败:', error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// PUT /api/video2/scenes/:id —— 更新场次（名称 / 滚动位置）
+app.put('/api/video2/scenes/:id', express.json({ limit: '1mb' }), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const { name, scrollPosition } = req.body;
+    await db.video2Scenes.update(id, {
+      name: name !== undefined ? name.trim() : undefined,
+      scrollPosition: scrollPosition !== undefined ? parseInt(scrollPosition) : undefined
+    });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('[video2] 更新场次失败:', error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// PUT /api/video2/scenes/sort —— 更新场次排序
+app.put('/api/video2/scenes/sort', express.json({ limit: '1mb' }), async (req, res) => {
+  try {
+    const { orders } = req.body;
+    if (!Array.isArray(orders)) return res.status(400).json({ success: false, message: 'orders 应为数组' });
+    await db.video2Scenes.updateSort(orders.filter(o => o && typeof o.id === 'number' && typeof o.sortOrder === 'number'));
+    res.json({ success: true });
+  } catch (error) {
+    console.error('[video2] 更新场次排序失败:', error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// DELETE /api/video2/scenes/:id —— 删除场次（视频归到未分类）
+app.delete('/api/video2/scenes/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    await db.video2Scenes.delete(id);
+    console.log(`[video2] 场次 ID ${id} 已删除，视频归到未分类`);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('[video2] 删除场次失败:', error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// ==================== video2 微信分享落地页 ====================
+
+// /share/video2/project/:id —— 服务端渲染分享 meta + 自动跳转
+app.get('/share/video2/project/:id', async (req, res) => {
+  try {
+    const projectId = parseInt(req.params.id);
+    const project = await db.video2Projects.getById(projectId);
+    if (!project) {
+      // 项目不存在，跳转到 video2 首页
+      return res.redirect('/video2');
+    }
+
+    // 读取 dist/index.html 作为分享模板
+    const distIndexPath = path.join(__dirname, '../dist/index.html');
+    let html = fs.readFileSync(distIndexPath, 'utf-8');
+
+    const origin = `${req.protocol}://${req.get('host')}`;
+    const title = project.name;
+    const description = project.description || '柒子文化拍摄辅助 · 项目分享';
+    const image = project.coverUrl || '/images/hero-home.png';
+    const shareUrl = `${origin}/share/video2/project/${projectId}`;
+    const redirectUrl = `${origin}/video2/project/${projectId}`;
+
+    html = html
+      .replace(/<meta property="og:title" content="[^"]*" \/>/, `<meta property="og:title" content="${escapeHtml(title)}" />`)
+      .replace(/<meta property="og:description" content="[^"]*" \/>/, `<meta property="og:description" content="${escapeHtml(description)}" />`)
+      .replace(/<meta property="og:image" content="[^"]*" \/>/, `<meta property="og:image" content="${getFullImageUrl(image, req)}" />`)
+      .replace(/<meta property="og:url" content="[^"]*" \/>/, `<meta property="og:url" content="${escapeHtml(shareUrl)}" />`)
+      .replace(/<meta name="description" content="[^"]*" \/>/, `<meta name="description" content="${escapeHtml(description)}" />`)
+      .replace(/<meta name="wechat:title" content="[^"]*" \/>/, `<meta name="wechat:title" content="${escapeHtml(title)}" />`)
+      .replace(/<meta name="wechat:description" content="[^"]*" \/>/, `<meta name="wechat:description" content="${escapeHtml(description)}" />`)
+      .replace(/<meta name="wechat:image" content="[^"]*" \/>/, `<meta name="wechat:image" content="${getFullImageUrl(image, req)}" />`)
+      .replace(/<meta name="twitter:title" content="[^"]*" \/>/, `<meta name="twitter:title" content="${escapeHtml(title)}" />`)
+      .replace(/<meta name="twitter:description" content="[^"]*" \/>/, `<meta name="twitter:description" content="${escapeHtml(description)}" />`)
+      .replace(/<meta name="twitter:image" content="[^"]*" \/>/, `<meta name="twitter:image" content="${getFullImageUrl(image, req)}" />`)
+      .replace(/<title>[^<]*<\/title>/, `<title>${escapeHtml(title)}</title>`)
+      // 注入跳转脚本
+      .replace('</body>', `<script>setTimeout(function(){window.location.href='${redirectUrl}';},500);</script></body>`);
+
+    console.log(`[video2] 为项目 ID ${projectId} 渲染了分享落地页`);
+    res.send(html);
+  } catch (error) {
+    console.error('[video2] 渲染分享落地页失败:', error);
+    res.redirect('/video2');
+  }
+});
+
+// ==================== video2 SSR（/video2 与 /video2/project/:id） ====================
+
 // 动态渲染 index.html（服务端预渲染 meta 标签）
 app.get('*', async (req, res) => {
   try {
-    // 如果请求的是静态文件，让 express.static 处理（已经在前面定义了）
-    if (req.path.startsWith('/images/') || req.path.startsWith('/uploads/') || 
+    // 静态文件过滤（图片、上传文件、带扩展名的路径）
+    if (req.path.startsWith('/images/') || req.path.startsWith('/uploads/') ||
         req.path.includes('.')) {
       return res.status(404).end();
     }
 
-    // 前端构建后的 index.html
     const distIndexPath = path.join(__dirname, '../dist/index.html');
     let html = fs.readFileSync(distIndexPath, 'utf-8');
-    
+
     // 获取首页内容用于默认 meta 标签
     let homeContent = null;
     try {
@@ -2666,74 +2991,92 @@ app.get('*', async (req, res) => {
     } catch (e) {
       console.warn('获取首页内容失败:', e);
     }
-    
-    // 检查是否有 id 参数
+
+    const origin = `${req.protocol}://${req.get('host')}`;
+    const reqPath = req.path;
+
+    // ── /video2 项目列表页 ──────────────────────────────────────
+    if (reqPath === '/video2' && !req.query.projectId) {
+      const title = '柒子文化拍摄辅助';
+      const description = '专业的视频拍摄管理工具，帮助团队高效管理拍摄素材';
+      const image = homeContent?.heroImage || '/images/hero-home.png';
+      const url = `${origin}/video2`;
+      html = applyShareMeta(html, title, description, image, url);
+      console.log('为 /video2 渲染了自定义 meta 标签');
+      return res.send(html);
+    }
+
+    // ── /video2/project/:id 项目详情页 ─────────────────────────
+    const projectMatch = reqPath.match(/^\/video2\/project\/(\d+)$/);
+    if (projectMatch) {
+      try {
+        const projectId = parseInt(projectMatch[1]);
+        const project = await db.video2Projects.getById(projectId);
+        if (project) {
+          const title = project.name;
+          const description = project.description || '柒子文化拍摄辅助 · 项目分享';
+          const image = project.coverUrl || '/images/hero-home.png';
+          const url = `${origin}/video2/project/${projectId}`;
+          html = applyShareMeta(html, title, description, image, url);
+          console.log(`为项目 ID ${projectId} 渲染了 SSR meta 标签`);
+        }
+      } catch (e) {
+        console.warn('获取项目信息失败:', e);
+      }
+      return res.send(html);
+    }
+
+    // ── 作品分享（?id=） ────────────────────────────────────────
     const id = req.query.id;
     if (id) {
       try {
-        // 获取作品集数据
         const items = await db.portfolioItems.getAll();
         const item = items.find(i => i.id.toString() === id.toString());
-        
         if (item) {
           const title = item.title || (homeContent?.shareTitle || '大连柒子文化发展有限公司');
           const description = item.shortDesc || item.fullDesc || item.category || (homeContent?.shareDescription || '诚信立足 创新致远');
           const image = item.img || (homeContent?.heroImage || '/images/hero-home.png');
-          const url = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
-          
-          // 替换 meta 标签
-          html = html
-            .replace(/<meta property="og:title" content="[^"]*" \/>/, `<meta property="og:title" content="${escapeHtml(title)}" />`)
-            .replace(/<meta property="og:description" content="[^"]*" \/>/, `<meta property="og:description" content="${escapeHtml(description)}" />`)
-            .replace(/<meta property="og:image" content="[^"]*" \/>/, `<meta property="og:image" content="${getFullImageUrl(image, req)}" />`)
-            .replace(/<meta property="og:url" content="[^"]*" \/>/, `<meta property="og:url" content="${escapeHtml(url)}" />`)
-            .replace(/<meta name="description" content="[^"]*" \/>/, `<meta name="description" content="${escapeHtml(description)}" />`)
-            .replace(/<meta name="wechat:title" content="[^"]*" \/>/, `<meta name="wechat:title" content="${escapeHtml(title)}" />`)
-            .replace(/<meta name="wechat:description" content="[^"]*" \/>/, `<meta name="wechat:description" content="${escapeHtml(description)}" />`)
-            .replace(/<meta name="wechat:image" content="[^"]*" \/>/, `<meta name="wechat:image" content="${getFullImageUrl(image, req)}" />`)
-            .replace(/<meta name="twitter:title" content="[^"]*" \/>/, `<meta name="twitter:title" content="${escapeHtml(title)}" />`)
-            .replace(/<meta name="twitter:description" content="[^"]*" \/>/, `<meta name="twitter:description" content="${escapeHtml(description)}" />`)
-            .replace(/<meta name="twitter:image" content="[^"]*" \/>/, `<meta name="twitter:image" content="${getFullImageUrl(image, req)}" />`)
-            .replace(/<title>[^<]*<\/title>/, `<title>${escapeHtml(title)}</title>`);
-          
+          const url = `${origin}${req.originalUrl}`;
+          html = applyShareMeta(html, title, description, image, url);
           console.log(`为作品 ID ${id} 渲染了自定义 meta 标签`);
         }
       } catch (itemErr) {
         console.warn('获取作品信息失败，使用默认 meta 标签:', itemErr);
       }
-    } else {
-      // 首页：使用数据库中的配置更新默认 meta 标签
-      const title = homeContent?.shareTitle || '大连柒子文化发展有限公司';
-      const description = homeContent?.shareDescription || '诚信立足 创新致远';
-      const image = homeContent?.heroImage || '/images/hero-home.png';
-      const url = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
-      
-      // 替换 meta 标签
-      html = html
-        .replace(/<meta property="og:title" content="[^"]*" \/>/, `<meta property="og:title" content="${escapeHtml(title)}" />`)
-        .replace(/<meta property="og:description" content="[^"]*" \/>/, `<meta property="og:description" content="${escapeHtml(description)}" />`)
-        .replace(/<meta property="og:image" content="[^"]*" \/>/, `<meta property="og:image" content="${getFullImageUrl(image, req)}" />`)
-        .replace(/<meta property="og:url" content="[^"]*" \/>/, `<meta property="og:url" content="${escapeHtml(url)}" />`)
-        .replace(/<meta name="description" content="[^"]*" \/>/, `<meta name="description" content="${escapeHtml(description)}" />`)
-        .replace(/<meta name="wechat:title" content="[^"]*" \/>/, `<meta name="wechat:title" content="${escapeHtml(title)}" />`)
-        .replace(/<meta name="wechat:description" content="[^"]*" \/>/, `<meta name="wechat:description" content="${escapeHtml(description)}" />`)
-        .replace(/<meta name="wechat:image" content="[^"]*" \/>/, `<meta name="wechat:image" content="${getFullImageUrl(image, req)}" />`)
-        .replace(/<meta name="twitter:title" content="[^"]*" \/>/, `<meta name="twitter:title" content="${escapeHtml(title)}" />`)
-        .replace(/<meta name="twitter:description" content="[^"]*" \/>/, `<meta name="twitter:description" content="${escapeHtml(description)}" />`)
-        .replace(/<meta name="twitter:image" content="[^"]*" \/>/, `<meta name="twitter:image" content="${getFullImageUrl(image, req)}" />`)
-        .replace(/<title>[^<]*<\/title>/, `<title>${escapeHtml(title)}</title>`);
-      
-      console.log('为首页渲染了自定义 meta 标签');
+      return res.send(html);
     }
-    
+
+    // ── 首页（默认） ─────────────────────────────────────────────
+    const title = homeContent?.shareTitle || '大连柒子文化发展有限公司';
+    const description = homeContent?.shareDescription || '诚信立足 创新致远';
+    const image = homeContent?.heroImage || '/images/hero-home.png';
+    const url = `${origin}${req.originalUrl}`;
+    html = applyShareMeta(html, title, description, image, url);
+    console.log('为首页渲染了自定义 meta 标签');
     res.send(html);
   } catch (error) {
     console.error('渲染 index.html 失败:', error);
-    // 出错时返回原始模板
     const distIndexPath = path.join(__dirname, '../dist/index.html');
     res.sendFile(distIndexPath);
   }
 });
+
+// 提取 meta 标签替换逻辑为独立函数（供 app.get('*') 复用）
+function applyShareMeta(html, title, description, image, url) {
+  return html
+    .replace(/<meta property="og:title" content="[^"]*" \/>/, `<meta property="og:title" content="${escapeHtml(title)}" />`)
+    .replace(/<meta property="og:description" content="[^"]*" \/>/, `<meta property="og:description" content="${escapeHtml(description)}" />`)
+    .replace(/<meta property="og:image" content="[^"]*" \/>/, `<meta property="og:image" content="${getFullImageUrl(image, null)}" />`)
+    .replace(/<meta property="og:url" content="[^"]*" \/>/, `<meta property="og:url" content="${escapeHtml(url)}" />`)
+    .replace(/<meta name="description" content="[^"]*" \/>/, `<meta name="description" content="${escapeHtml(description)}" />`)
+    .replace(/<meta name="wechat:title" content="[^"]*" \/>/, `<meta name="wechat:title" content="${escapeHtml(title)}" />`)
+    .replace(/<meta name="wechat:description" content="[^"]*" \/>/, `<meta name="wechat:description" content="${escapeHtml(description)}" />`)
+    .replace(/<meta name="wechat:image" content="[^"]*" \/>/, `<meta name="wechat:image" content="${getFullImageUrl(image, null)}" />`)
+    .replace(/<meta name="twitter:title" content="[^"]*" \/>/, `<meta name="twitter:title" content="${escapeHtml(title)}" />`)
+    .replace(/<meta name="twitter:description" content="[^"]*" \/>/, `<meta name="twitter:description" content="${escapeHtml(description)}" />`)
+    .replace(/<meta name="twitter:image" content="[^"]*" \/>/, `<meta name="twitter:image" content="${getFullImageUrl(image, null)}" />`)
+    .replace(/<title>[^<]*<\/title>/, `<title>${escapeHtml(title)}</title>`);
+}
 
 // 工具函数：转义 HTML 特殊字符
 function escapeHtml(text) {

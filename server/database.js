@@ -681,107 +681,374 @@ const video2Db = new sqlite3.Database(video2DbPath, (err) => {
   }
 });
 
+// video2 数据库就绪标志（所有 DDL 完成后才为 true）
+let video2DbReady = false;
+const video2DbWaiters = [];
+
+function video2DbOnReady(cb) {
+  if (video2DbReady) { cb && cb(); return; }
+  if (cb) video2DbWaiters.push(cb);
+}
+function video2DbSetReady() {
+  if (video2DbReady) return;
+  video2DbReady = true;
+  const list = video2DbWaiters.splice(0, video2DbWaiters.length);
+  list.forEach(function(cb) { try { cb(); } catch (e) {} });
+  console.log('[video2] 表结构已就绪');
+}
+
 function initVideo2Database() {
-  video2Db.run(`
-    CREATE TABLE IF NOT EXISTS videos (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      title TEXT NOT NULL,
-      filename TEXT NOT NULL,
-      url TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'pending',
-      size INTEGER,
-      duration REAL,
-      sortOrder INTEGER DEFAULT 0,
-      createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-  // 检查并补齐 sortOrder 列（对旧数据库升级）
-  video2Db.all('PRAGMA table_info(videos)', function(err, columns) {
-    if (err) {
-      console.error('[video2] PRAGMA table_info 失败:', err.message);
+  video2Db.serialize(() => {
+    // 1. 创建 videos 表（完整新结构，包括所有新列）
+    video2Db.run(`
+      CREATE TABLE IF NOT EXISTS videos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        filename TEXT NOT NULL,
+        url TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        size INTEGER,
+        duration REAL,
+        sortOrder INTEGER DEFAULT 0,
+        deleted INTEGER DEFAULT 0,
+        deletedAt DATETIME,
+        projectId INTEGER,
+        sceneId INTEGER,
+        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // 2. 创建 projects 表
+    video2Db.run(`
+      CREATE TABLE IF NOT EXISTS projects (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        description TEXT DEFAULT '',
+        coverUrl TEXT,
+        sortOrder INTEGER DEFAULT 0,
+        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // 3. 创建 scenes 表
+    video2Db.run(`
+      CREATE TABLE IF NOT EXISTS scenes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        projectId INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        sortOrder INTEGER DEFAULT 0,
+        scrollPosition INTEGER DEFAULT 0,
+        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (projectId) REFERENCES projects(id) ON DELETE CASCADE
+      )
+    `);
+
+    // 4. 安全添加列（列已存在时报 duplicate column name，忽略即可，依然在 serialize 上下文中串行）
+    //    对旧数据库升级：逐列补齐
+    const ignoredMsg = 'duplicate column name';
+    const addColSqlList = [
+      'ALTER TABLE videos ADD COLUMN sortOrder INTEGER DEFAULT 0',
+      'ALTER TABLE videos ADD COLUMN deleted INTEGER DEFAULT 0',
+      'ALTER TABLE videos ADD COLUMN deletedAt DATETIME',
+      'ALTER TABLE videos ADD COLUMN projectId INTEGER',
+      'ALTER TABLE videos ADD COLUMN sceneId INTEGER'
+    ];
+    addColSqlList.forEach(function(sql) {
+      video2Db.run(sql, function(err) {
+        if (err && String(err.message).indexOf(ignoredMsg) === -1) {
+          console.error('[video2] ALTER TABLE 失败:', err.message);
+        }
+      });
+    });
+
+    // 5. 创建索引
+    video2Db.run('CREATE INDEX IF NOT EXISTS idx_videos_status ON videos(status)');
+    video2Db.run('CREATE INDEX IF NOT EXISTS idx_videos_sort ON videos(sortOrder)');
+    video2Db.run('CREATE INDEX IF NOT EXISTS idx_videos_deleted ON videos(deleted)');
+    video2Db.run('CREATE INDEX IF NOT EXISTS idx_videos_project ON videos(projectId)');
+    video2Db.run('CREATE INDEX IF NOT EXISTS idx_videos_scene ON videos(sceneId)');
+    video2Db.run('CREATE INDEX IF NOT EXISTS idx_scenes_project ON scenes(projectId)');
+
+    // 6. 迁移：sortOrder 回填 + 默认项目创建
+    //    用最后一条 run() 的回调确保所有上述 DDL 已完成
+    video2Db.get('SELECT 1 as ok', function(_err, _row) {
+      // 先确保 sortOrder 有值
+      video2Db.get('SELECT COUNT(*) as cnt FROM videos WHERE sortOrder IS NULL', function(err2, r) {
+        if (!err2 && r && r.cnt > 0) {
+          fillSortOrder();
+        }
+        // 迁移默认项目
+        migrateDefaultProject(function() {
+          video2DbSetReady();
+        });
+      });
+    });
+  });
+}
+
+function fillSortOrder() {
+  video2Db.all('SELECT id FROM videos ORDER BY createdAt ASC, id ASC', function(err2, rows) {
+    if (err2) {
+      console.error('[video2] 查询视频列表失败:', err2.message);
       return;
     }
-    if (!columns || columns.length === 0) {
-      // 新库刚创建，sortOrder 已包含在 CREATE TABLE 中，跳过
-      console.log('[video2] 新建数据库，跳过列升级');
-    } else {
-      const colNames = columns.map(function(c) { return c.name; });
-      if (!colNames.includes('sortOrder')) {
-        console.log('[video2] 升级：新增 sortOrder 列并填充默认值');
-        video2Db.run('ALTER TABLE videos ADD COLUMN sortOrder INTEGER DEFAULT 0');
-        video2Db.all('SELECT id FROM videos ORDER BY createdAt ASC, id ASC', function(err2, rows) {
-          if (err2) {
-            console.error('[video2] 查询视频列表失败:', err2.message);
+    (rows || []).forEach(function(r, i) {
+      video2Db.run('UPDATE videos SET sortOrder = ? WHERE id = ?', [i, r.id]);
+    });
+    console.log('[video2] sortOrder 填充完成，共 ' + (rows ? rows.length : 0) + ' 条');
+  });
+}
+
+function migrateDefaultProject(callback) {
+  video2Db.get('SELECT COUNT(*) as cnt FROM projects', function(err, row) {
+    if (err) {
+      console.error('[video2] 检查 projects 表失败:', err.message);
+      callback && callback();
+      return;
+    }
+    if (row && row.cnt === 0) {
+      // 插入"默认项目"
+      video2Db.run(
+        "INSERT INTO projects (name, description, sortOrder) VALUES ('默认项目', '自动创建的默认项目，所有历史视频归入此处', 0)",
+        function(insErr) {
+          if (insErr) {
+            console.error('[video2] 创建默认项目失败:', insErr.message);
+            callback && callback();
             return;
           }
-          (rows || []).forEach(function(r, i) {
-            video2Db.run('UPDATE videos SET sortOrder = ? WHERE id = ?', [i, r.id]);
-          });
-          console.log('[video2] sortOrder 填充完成，共 ' + (rows ? rows.length : 0) + ' 条');
-        });
-      }
+          const defaultProjectId = this.lastID;
+          video2Db.run(
+            'UPDATE videos SET projectId = ? WHERE projectId IS NULL',
+            [defaultProjectId],
+            function(upErr) {
+              if (upErr) {
+                console.error('[video2] 迁移历史视频到默认项目失败:', upErr.message);
+              } else {
+                console.log('[video2] 已创建默认项目(ID=' + defaultProjectId + ')，历史视频已迁移');
+              }
+              callback && callback();
+            }
+          );
+        }
+      );
+    } else {
+      callback && callback();
     }
-    // 创建索引
-    video2Db.run('CREATE INDEX IF NOT EXISTS idx_videos_status ON videos(status)');
-    video2Db.run('CREATE INDEX IF NOT EXISTS idx_videos_sort ON videos(sortOrder)', function() {
-      console.log('[video2] 表结构已就绪');
-    });
   });
 }
 
 const video2Async = {
   get: (sql, params = []) => {
     return new Promise((resolve, reject) => {
-      video2Db.get(sql, params, (err, row) => {
-        if (err) reject(err);
-        else resolve(row);
+      video2DbOnReady(() => {
+        video2Db.get(sql, params, (err, row) => {
+          if (err) reject(err);
+          else resolve(row);
+        });
       });
     });
   },
   all: (sql, params = []) => {
     return new Promise((resolve, reject) => {
-      video2Db.all(sql, params, (err, rows) => {
-        if (err) reject(err);
-        else resolve(rows);
+      video2DbOnReady(() => {
+        video2Db.all(sql, params, (err, rows) => {
+          if (err) reject(err);
+          else resolve(rows);
+        });
       });
     });
   },
   run: (sql, params = []) => {
     return new Promise((resolve, reject) => {
-      video2Db.run(sql, params, function(err) {
-        if (err) reject(err);
-        else resolve({ lastID: this.lastID, changes: this.changes });
+      video2DbOnReady(() => {
+        video2Db.run(sql, params, function(err) {
+          if (err) reject(err);
+          else resolve({ lastID: this.lastID, changes: this.changes });
+        });
       });
     });
   }
 };
 
+// ── video2Projects ──────────────────────────────────────────────
+const video2Projects = {
+  getAll: async () => {
+    const projects = await video2Async.all(
+      'SELECT * FROM projects ORDER BY sortOrder ASC, id ASC'
+    );
+    // 附加视频数与占用空间
+    const result = [];
+    for (const p of projects) {
+      const stats = await video2Async.get(
+        'SELECT COUNT(*) as cnt, COALESCE(SUM(size),0) as totalSize FROM videos WHERE projectId = ? AND deleted = 0',
+        [p.id]
+      );
+      result.push({
+        ...p,
+        videoCount: stats ? stats.cnt : 0,
+        totalSize: stats ? stats.totalSize : 0
+      });
+    }
+    return result;
+  },
+  getById: async (id) => {
+    return await video2Async.get('SELECT * FROM projects WHERE id = ?', [id]);
+  },
+  create: async ({ name, description }) => {
+    const maxRow = await video2Async.get('SELECT MAX(sortOrder) as maxSort FROM projects');
+    const nextSort = ((maxRow && maxRow.maxSort != null) ? maxRow.maxSort : -1) + 1;
+    const result = await video2Async.run(
+      'INSERT INTO projects (name, description, sortOrder) VALUES (?, ?, ?)',
+      [name, description || '', nextSort]
+    );
+    return { id: result.lastID, name, description: description || '', sortOrder: nextSort };
+  },
+  update: async (id, { name, description, coverUrl }) => {
+    const fields = [];
+    const vals = [];
+    if (name !== undefined) { fields.push('name=?'); vals.push(name); }
+    if (description !== undefined) { fields.push('description=?'); vals.push(description); }
+    if (coverUrl !== undefined) { fields.push('coverUrl=?'); vals.push(coverUrl); }
+    if (fields.length === 0) return;
+    fields.push('updatedAt=CURRENT_TIMESTAMP');
+    vals.push(id);
+    await video2Async.run('UPDATE projects SET ' + fields.join(', ') + ' WHERE id = ?', vals);
+    return true;
+  },
+  updateSort: async (orders) => {
+    for (const item of orders) {
+      await video2Async.run(
+        'UPDATE projects SET sortOrder = ?, updatedAt = CURRENT_TIMESTAMP WHERE id = ?',
+        [item.sortOrder, item.id]
+      );
+    }
+    return true;
+  },
+  delete: async (id) => {
+    // 获取该项目下所有视频 url（用于调用方清理 OSS）
+    const videos = await video2Async.all(
+      'SELECT url FROM videos WHERE projectId = ?',
+      [id]
+    );
+    await video2Async.run('DELETE FROM scenes WHERE projectId = ?', [id]);
+    await video2Async.run('DELETE FROM projects WHERE id = ?', [id]);
+    return videos; // 返回视频 URL 列表，由调用方清理 OSS
+  }
+};
+
+// ── video2Scenes ──────────────────────────────────────────────
+const video2Scenes = {
+  getByProjectId: async (projectId) => {
+    const scenes = await video2Async.all(
+      'SELECT * FROM scenes WHERE projectId = ? ORDER BY sortOrder ASC, id ASC',
+      [projectId]
+    );
+    const result = [];
+    for (const s of scenes) {
+      const stats = await video2Async.get(
+        'SELECT COUNT(*) as cnt FROM videos WHERE sceneId = ? AND deleted = 0',
+        [s.id]
+      );
+      result.push({
+        ...s,
+        videoCount: stats ? stats.cnt : 0
+      });
+    }
+    return result;
+  },
+  create: async ({ projectId, name }) => {
+    const maxRow = await video2Async.get(
+      'SELECT MAX(sortOrder) as maxSort FROM scenes WHERE projectId = ?',
+      [projectId]
+    );
+    const nextSort = ((maxRow && maxRow.maxSort != null) ? maxRow.maxSort : -1) + 1;
+    const result = await video2Async.run(
+      'INSERT INTO scenes (projectId, name, sortOrder) VALUES (?, ?, ?)',
+      [projectId, name, nextSort]
+    );
+    return { id: result.lastID, projectId, name, sortOrder: nextSort, videoCount: 0 };
+  },
+  update: async (id, { name, scrollPosition }) => {
+    const fields = [];
+    const vals = [];
+    if (name !== undefined) { fields.push('name=?'); vals.push(name); }
+    if (scrollPosition !== undefined) { fields.push('scrollPosition=?'); vals.push(scrollPosition); }
+    if (fields.length === 0) return;
+    fields.push('updatedAt=CURRENT_TIMESTAMP');
+    vals.push(id);
+    await video2Async.run('UPDATE scenes SET ' + fields.join(', ') + ' WHERE id = ?', vals);
+    return true;
+  },
+  updateSort: async (orders) => {
+    for (const item of orders) {
+      await video2Async.run(
+        'UPDATE scenes SET sortOrder = ?, updatedAt = CURRENT_TIMESTAMP WHERE id = ?',
+        [item.sortOrder, item.id]
+      );
+    }
+    return true;
+  },
+  delete: async (id) => {
+    // 该场次下视频归到未分类
+    await video2Async.run('UPDATE videos SET sceneId = NULL WHERE sceneId = ?', [id]);
+    await video2Async.run('DELETE FROM scenes WHERE id = ?', [id]);
+    return true;
+  }
+};
+
+// ── video2Items（扩展）────────────────────────────────────────
 const video2Items = {
   getAll: async () => {
-    return await video2Async.all('SELECT * FROM videos ORDER BY sortOrder ASC, id ASC');
+    // 向后兼容：返回全部非删除视频
+    return await video2Async.all(
+      'SELECT * FROM videos WHERE deleted = 0 ORDER BY sortOrder ASC, id ASC'
+    );
+  },
+  getByFilter: async ({ projectId, sceneId, status, deleted }) => {
+    let sql = 'SELECT * FROM videos WHERE 1=1';
+    const params = [];
+    if (projectId !== undefined) { sql += ' AND projectId = ?'; params.push(projectId); }
+    if (sceneId !== undefined) { sql += sceneId === null ? ' AND sceneId IS NULL' : ' AND sceneId = ?'; if (sceneId !== null) params.push(sceneId); }
+    if (status !== undefined) { sql += ' AND status = ?'; params.push(status); }
+    if (deleted !== undefined) { sql += ' AND deleted = ?'; params.push(deleted); }
+    sql += ' ORDER BY sortOrder ASC, id ASC';
+    return await video2Async.all(sql, params);
   },
   getByStatus: async (status) => {
     return await video2Async.all(
-      'SELECT * FROM videos WHERE status = ? ORDER BY sortOrder ASC, id ASC',
+      'SELECT * FROM videos WHERE status = ? AND deleted = 0 ORDER BY sortOrder ASC, id ASC',
       [status]
     );
   },
   getStats: async () => {
-    const all = await video2Async.all('SELECT status, COUNT(*) as cnt FROM videos GROUP BY status');
-    const map = { pending: 0, done: 0, total: 0 };
+    // 仅统计未删除
+    const all = await video2Async.all(
+      'SELECT status, COUNT(*) as cnt FROM videos WHERE deleted = 0 GROUP BY status'
+    );
+    const map = { pending: 0, done: 0, total: 0, trash: 0 };
     all.forEach(r => {
       map[r.status] = r.cnt;
       map.total += r.cnt;
     });
+    const trash = await video2Async.get(
+      'SELECT COUNT(*) as cnt FROM videos WHERE deleted = 1'
+    );
+    map.trash = trash ? trash.cnt : 0;
     return map;
   },
+  getById: async (id) => {
+    return await video2Async.get('SELECT * FROM videos WHERE id = ?', [id]);
+  },
   create: async (item) => {
-    // 计算当前最大 sortOrder
-    const maxRow = await video2Async.get('SELECT MAX(sortOrder) as maxSort FROM videos');
+    const maxRow = await video2Async.get(
+      'SELECT MAX(sortOrder) as maxSort FROM videos WHERE deleted = 0'
+    );
     const nextSort = ((maxRow && maxRow.maxSort != null) ? maxRow.maxSort : -1) + 1;
     const result = await video2Async.run(
-      'INSERT INTO videos (title, filename, url, status, size, duration, sortOrder) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO videos (title, filename, url, status, size, duration, sortOrder, projectId, sceneId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
       [
         item.title,
         item.filename,
@@ -789,7 +1056,9 @@ const video2Items = {
         item.status || 'pending',
         item.size || null,
         item.duration || null,
-        nextSort
+        nextSort,
+        item.projectId !== undefined ? item.projectId : null,
+        item.sceneId !== undefined ? item.sceneId : null
       ]
     );
     return { id: result.lastID, sortOrder: nextSort, ...item };
@@ -801,8 +1070,14 @@ const video2Items = {
     );
     return result.changes > 0;
   },
+  updateTitle: async (id, title) => {
+    const result = await video2Async.run(
+      'UPDATE videos SET title = ?, updatedAt = CURRENT_TIMESTAMP WHERE id = ?',
+      [title, id]
+    );
+    return result.changes > 0;
+  },
   updateSort: async (orders) => {
-    // orders: [{ id, sortOrder }]
     for (const item of orders) {
       await video2Async.run(
         'UPDATE videos SET sortOrder = ?, updatedAt = CURRENT_TIMESTAMP WHERE id = ?',
@@ -811,6 +1086,68 @@ const video2Items = {
     }
     return true;
   },
+  // 软删除（移入垃圾桶）
+  softDelete: async (id) => {
+    const result = await video2Async.run(
+      'UPDATE videos SET deleted = 1, deletedAt = CURRENT_TIMESTAMP, updatedAt = CURRENT_TIMESTAMP WHERE id = ?',
+      [id]
+    );
+    return result.changes > 0;
+  },
+  // 从垃圾桶恢复
+  restore: async (id) => {
+    const result = await video2Async.run(
+      'UPDATE videos SET deleted = 0, deletedAt = NULL, updatedAt = CURRENT_TIMESTAMP WHERE id = ?',
+      [id]
+    );
+    return result.changes > 0;
+  },
+  // 彻底删除（DB 记录，由调用方清理 OSS）
+  hardDelete: async (id) => {
+    const result = await video2Async.run('DELETE FROM videos WHERE id = ?', [id]);
+    return result.changes > 0;
+  },
+  // 批量软删除
+  batchSoftDelete: async (ids) => {
+    const placeholders = ids.map(() => '?').join(',');
+    const result = await video2Async.run(
+      `UPDATE videos SET deleted = 1, deletedAt = CURRENT_TIMESTAMP, updatedAt = CURRENT_TIMESTAMP WHERE id IN (${placeholders})`,
+      ids
+    );
+    return result.changes;
+  },
+  // 批量恢复
+  batchRestore: async (ids) => {
+    const placeholders = ids.map(() => '?').join(',');
+    const result = await video2Async.run(
+      `UPDATE videos SET deleted = 0, deletedAt = NULL, updatedAt = CURRENT_TIMESTAMP WHERE id IN (${placeholders})`,
+      ids
+    );
+    return result.changes;
+  },
+  // 批量彻底删除（返回被删视频的 URL 列表）
+  batchHardDelete: async (ids) => {
+    const placeholders = ids.map(() => '?').join(',');
+    const rows = await video2Async.all(
+      `SELECT url FROM videos WHERE id IN (${placeholders})`,
+      ids
+    );
+    await video2Async.run(
+      `DELETE FROM videos WHERE id IN (${placeholders})`,
+      ids
+    );
+    return rows.map(r => r.url);
+  },
+  // 批量移动到场次
+  batchChangeScene: async (ids, sceneId) => {
+    const placeholders = ids.map(() => '?').join(',');
+    const result = await video2Async.run(
+      `UPDATE videos SET sceneId = ?, updatedAt = CURRENT_TIMESTAMP WHERE id IN (${placeholders})`,
+      [sceneId, ...ids]
+    );
+    return result.changes;
+  },
+  // 兼容旧 API（硬删除，保留给 server.js 旧 DELETE 路由的兼容实现）
   delete: async (id) => {
     const result = await video2Async.run('DELETE FROM videos WHERE id = ?', [id]);
     return result.changes > 0;
@@ -824,5 +1161,7 @@ module.exports = {
   teamMembers,
   categoriesDetails,
   video2Items,
+  video2Projects,
+  video2Scenes,
   db
 };
