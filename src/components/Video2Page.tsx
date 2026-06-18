@@ -142,7 +142,13 @@ export function Video2Page({ projectId }: Video2PageProps) {
     try {
       const params = new URLSearchParams();
       params.set('projectId', String(projectId));
-      if (currentSceneId !== null) params.set('sceneId', String(currentSceneId));
+      // currentSceneId === null 表示"未分类"，需要显式传 "null" 让后端过滤 sceneId IS NULL；
+      // currentSceneId !== null 表示具体场次，传数字 ID；未定义则不过滤。
+      if (currentSceneId === null) {
+        params.set('sceneId', 'null');
+      } else if (currentSceneId !== null) {
+        params.set('sceneId', String(currentSceneId));
+      }
       if (currentTab === 'trash') params.set('deleted', '1');
       else params.set('status', currentTab);
       const res = await fetch(`/api/video2/list?${params.toString()}`);
@@ -162,7 +168,8 @@ export function Video2Page({ projectId }: Video2PageProps) {
       const res = await fetch(`/api/video2/stats?projectId=${projectId}`);
       const data = await res.json();
       if (data.success) {
-        setStats({ pending: data.pending || 0, done: data.done || 0, trash: data.trash || 0 });
+        const s = data.data || {};
+        setStats({ pending: s.pending || 0, done: s.done || 0, trash: s.trash || 0 });
       }
     } catch (e) {
       console.error('加载统计失败:', e);

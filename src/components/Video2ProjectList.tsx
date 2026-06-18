@@ -80,6 +80,8 @@ export function Video2ProjectList() {
   // 每个项目的参考文件缓存（含封面作为第一个元素）
   const [referencesCache, setReferencesCache] = useState<Record<number, ReferenceItem[]>>({});
   const [carouselIndex, setCarouselIndex] = useState<Record<number, number>>({});
+  const [fullscreenItem, setFullscreenItem] = useState<ReferenceItem | null>(null);
+  const [fullscreenTitle, setFullscreenTitle] = useState<string>('');
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
@@ -109,7 +111,7 @@ export function Video2ProjectList() {
     document.title = '柒子文化拍摄辅助';
   }, [loadProjects]);
 
-  // 加载某项目的参考文件，并将项目 coverUrl 作为第一张
+  // 加载某项目的参考文件
   const loadReferences = useCallback(async (projectId: number) => {
     try {
       const res = await fetch(`/api/video2/projects/${projectId}/references`);
@@ -123,6 +125,30 @@ export function Video2ProjectList() {
       setReferencesCache(prev => ({ ...prev, [projectId]: refs }));
     } catch (e) {
       console.error('加载参考文件失败:', e);
+    }
+  }, []);
+
+  // 兜底：若无参考文件，则加载项目内前 6 个普通素材作为预览
+  const loadProjectMedia = useCallback(async (projectId: number) => {
+    try {
+      const params = new URLSearchParams();
+      params.set('projectId', String(projectId));
+      params.set('status', 'pending');
+      const res = await fetch(`/api/video2/list?${params.toString()}`);
+      const data = await res.json();
+      const items: any[] = (data.data || []).slice(0, 6);
+      const refs: ReferenceItem[] = items.map((it: any) => ({
+        id: it.id,
+        type: it.type,
+        url: it.url,
+        title: it.title
+      }));
+      setReferencesCache(prev => {
+        if (prev[projectId] && prev[projectId]!.length > 0) return prev;
+        return { ...prev, [projectId]: refs };
+      });
+    } catch (e) {
+      console.error('加载项目素材兜底失败:', e);
     }
   }, []);
 
@@ -304,13 +330,12 @@ export function Video2ProjectList() {
     window.location.href = `/video2/project/${id}`;
   };
 
-  // 轮播：封面 + reference 合并为一个展示列表
+  // 轮播：封面 + reference / 普通素材 合并为一个展示列表
   const buildMediaList = (project: Project): ReferenceItem[] => {
     const refs = referencesCache[project.id] || [];
     const cover: ReferenceItem | null = project.coverUrl
       ? { id: -1, type: 'image', url: project.coverUrl, title: '封面' }
       : null;
-    // 封面已在 referencesCache 中可能重复（如果用户将封面素材删除，后端 coverUrl 仍保留）
     if (refs.length === 0) {
       return cover ? [cover] : [];
     }
@@ -367,6 +392,14 @@ export function Video2ProjectList() {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           {projects.map(project => {
+            // 首次进入项目列表时，尝试加载素材作为预览；优先参考文件，其次是项目内素材
+            if (referencesCache[project.id] === undefined) {
+              loadReferences(project.id).then(() => {
+                if (!referencesCache[project.id] || referencesCache[project.id]!.length === 0) {
+                  loadProjectMedia(project.id);
+                }
+              });
+            }
             const mediaList = buildMediaList(project);
             const currentIdx = carouselIndex[project.id] || 0;
             const hasMultiple = mediaList.length > 1;
@@ -395,36 +428,39 @@ export function Video2ProjectList() {
                   </button>
                 </div>
 
-                {/* 合并后的封面/参考媒体区 */}
+                {/* 封面/参考媒体区（轮播预览） */}
                 <div
                   className="relative aspect-[16/10] cursor-pointer overflow-hidden bg-black/30"
                   onClick={() => goToProject(project.id)}
                 >
-                  {current && current.type === 'image' ? (
-                    <img
-                      src={current.url}
-                      alt={project.name}
-                      className="w-full h-full object-cover"
-                      onError={(ev) => { (ev.target as HTMLImageElement).src = DEFAULT_COVER; }}
-                    />
-                  ) : current ? (
-                    <video
-                      src={current.url}
-                      className="w-full h-full object-cover"
-                      controls={false}
-                      playsInline
-                      poster={getVideoPoster(current.url)}
-                    />
-                  ) : (
-                    <img src={DEFAULT_COVER} alt="" className="w-full h-full object-cover" />
-                  )}
+                  {(() => {
+                    // 统一渲染：图片与视频都显示为图片海报
+                    const mediaSrc = current
+                      ? (current.type === 'video'
+                          ? (getVideoPoster(current.url) || current.url)
+                          : current.url)
+                      : DEFAULT_COVER;
+                    return (
+                      <img
+                        src={mediaSrc}
+                        alt={project.name}
+                        className="w-full h-full object-cover"
+                        onError={(ev) => { (ev.target as HTMLImageElement).src = DEFAULT_COVER; }}
+                      />
+                    );
+                  })()}
 
-                  <div className="absolute inset-0 bg-gradient-to-t from-slate-900/95 via-slate-900/20 to-transparent" />
-                  <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                    <div className="px-4 py-2 rounded-full bg-white/15 backdrop-blur text-sm font-medium border border-white/20">
-                      进入项目
+                  {/* 底部渐变遮罩，增强文字对比度 */}
+                  <div className="absolute inset-0 bg-gradient-to-t from-slate-900/90 via-slate-900/10 to-transparent pointer-events-none" />
+
+                  {/* 视频条目：中央播放按钮叠加层 */}
+                  {current && current.type === 'video' && (
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                      <div className="w-14 h-14 rounded-full border-2 border-white/70 bg-black/40 backdrop-blur flex items-center justify-center">
+                        <Play className="w-6 h-6 text-white fill-white ml-0.5" />
+                      </div>
                     </div>
-                  </div>
+                  )}
 
                   {/* 左右切换按钮（仅当有多个媒体时） */}
                   {hasMultiple && (
@@ -460,12 +496,16 @@ export function Video2ProjectList() {
                     </div>
                   )}
 
-                  {/* 右上角「全屏」预览图标（体验一致） */}
+                  {/* 右上：全屏预览 */}
                   {current && (
                     <button
-                      onClick={(e) => { e.stopPropagation(); /* 仅视觉，不额外弹窗 */ }}
-                      className="absolute top-3 left-3 z-20 w-9 h-9 rounded-full border border-white/20 bg-white/5 backdrop-blur hover:bg-white/15 flex items-center justify-center transition"
-                      title="项目封面"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setFullscreenItem(current);
+                        setFullscreenTitle(project.name);
+                      }}
+                      className="absolute top-3 right-3 z-20 w-9 h-9 rounded-full border border-white/20 bg-white/5 backdrop-blur hover:bg-white/15 flex items-center justify-center transition"
+                      title="全屏预览"
                     >
                       <Maximize2 className="w-4 h-4 text-white/80" />
                     </button>
@@ -697,6 +737,33 @@ export function Video2ProjectList() {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* 全屏预览弹窗 */}
+      {fullscreenItem && (
+        <div className="fixed inset-0 z-[80] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setFullscreenItem(null)}>
+          <button
+            onClick={() => setFullscreenItem(null)}
+            className="absolute top-4 right-4 w-10 h-10 rounded-full border border-white/25 bg-white/5 hover:bg-white/15 flex items-center justify-center text-white z-10"
+          >
+            <X className="w-5 h-5" />
+          </button>
+          <div className="max-w-6xl w-full max-h-full" onClick={e => e.stopPropagation()}>
+            {fullscreenItem.type === 'image' ? (
+              <img src={fullscreenItem.url} alt={fullscreenTitle || fullscreenItem.title} className="mx-auto max-w-full max-h-[80vh] object-contain rounded-2xl" />
+            ) : (
+              <video
+                src={fullscreenItem.url}
+                poster={getVideoPoster(fullscreenItem.url)}
+                controls
+                autoPlay
+                playsInline
+                className="mx-auto max-w-full max-h-[80vh] rounded-2xl bg-black"
+              />
+            )}
+            <p className="text-center text-sm text-slate-300 mt-4">{fullscreenTitle || fullscreenItem.title}</p>
           </div>
         </div>
       )}
