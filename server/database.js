@@ -905,14 +905,17 @@ const video2Projects = {
   getById: async (id) => {
     return await video2Async.get('SELECT * FROM projects WHERE id = ?', [id]);
   },
-  create: async ({ name, description }) => {
+  create: async ({ name, description, coverUrl }) => {
     const maxRow = await video2Async.get('SELECT MAX(sortOrder) as maxSort FROM projects');
     const nextSort = ((maxRow && maxRow.maxSort != null) ? maxRow.maxSort : -1) + 1;
+    const DEFAULT_COVER = 'data:image/svg+xml;utf8,' +
+      encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 225"><defs><linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#7c3aed"/><stop offset="100%" stop-color="#ec4899"/></linearGradient></defs><rect width="400" height="225" fill="url(#g)"/></svg>');
+    const finalCoverUrl = coverUrl || DEFAULT_COVER;
     const result = await video2Async.run(
-      'INSERT INTO projects (name, description, sortOrder) VALUES (?, ?, ?)',
-      [name, description || '', nextSort]
+      'INSERT INTO projects (name, description, sortOrder, coverUrl) VALUES (?, ?, ?, ?)',
+      [name, description || '', nextSort, finalCoverUrl]
     );
-    return { id: result.lastID, name, description: description || '', sortOrder: nextSort };
+    return { id: result.lastID, name, description: description || '', sortOrder: nextSort, coverUrl: finalCoverUrl };
   },
   update: async (id, { name, description, coverUrl }) => {
     const fields = [];
@@ -1033,10 +1036,12 @@ const video2Items = {
       [status]
     );
   },
-  getStats: async () => {
-    // 仅统计未删除
+  getStats: async (projectId) => {
+    const whereProject = projectId !== undefined ? ' AND projectId = ?' : '';
+    const params = projectId !== undefined ? [projectId] : [];
     const all = await video2Async.all(
-      'SELECT status, COUNT(*) as cnt FROM videos WHERE deleted = 0 GROUP BY status'
+      'SELECT status, COUNT(*) as cnt FROM videos WHERE deleted = 0' + whereProject + ' GROUP BY status',
+      params
     );
     const map = { pending: 0, done: 0, total: 0, trash: 0 };
     all.forEach(r => {
@@ -1044,7 +1049,8 @@ const video2Items = {
       map.total += r.cnt;
     });
     const trash = await video2Async.get(
-      'SELECT COUNT(*) as cnt FROM videos WHERE deleted = 1'
+      'SELECT COUNT(*) as cnt FROM videos WHERE deleted = 1' + whereProject,
+      params
     );
     map.trash = trash ? trash.cnt : 0;
     return map;

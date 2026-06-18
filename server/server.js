@@ -2717,24 +2717,37 @@ app.put('/api/video2/videos/:id/title', express.json({ limit: '1mb' }), async (r
 // PUT /api/video2/videos/batch-update —— 批量操作
 app.put('/api/video2/videos/batch-update', express.json({ limit: '1mb' }), async (req, res) => {
   try {
-    const { videoIds, operation, sceneId } = req.body;
-    if (!Array.isArray(videoIds) || videoIds.length === 0) {
-      return res.status(400).json({ success: false, message: 'videoIds 应为非空数组' });
-    }
-    const ids = videoIds.map(Number);
+    const { videoIds, operation, sceneId, action, ids, orders } = req.body;
+    // 新风格：{ action, ids, ... }
+    const finalAction = action || operation;
+    const finalIds = ids && Array.isArray(ids) ? ids : (videoIds && Array.isArray(videoIds) ? videoIds : null);
     let changes = 0;
-    if (operation === 'softDelete') {
-      changes = await db.video2Items.batchSoftDelete(ids);
-    } else if (operation === 'restore') {
-      changes = await db.video2Items.batchRestore(ids);
-    } else if (operation === 'hardDelete') {
-      const urls = await db.video2Items.batchHardDelete(ids);
+    if (finalAction === 'reorder') {
+      const normalized = (orders || [])
+        .filter(function(item) { return item && typeof item.id === 'number' && typeof item.sortOrder === 'number'; })
+        .map(function(item) { return { id: item.id, sortOrder: item.sortOrder }; });
+      if (normalized.length === 0) {
+        return res.status(400).json({ success: false, message: '参数 orders 无效' });
+      }
+      await db.video2Items.updateSort(normalized);
+      return res.json({ success: true, changes: normalized.length });
+    }
+    if (!finalIds || finalIds.length === 0) {
+      return res.status(400).json({ success: false, message: 'ids 应为非空数组' });
+    }
+    const numIds = finalIds.map(Number);
+    if (finalAction === 'softDelete') {
+      changes = await db.video2Items.batchSoftDelete(numIds);
+    } else if (finalAction === 'restore') {
+      changes = await db.video2Items.batchRestore(numIds);
+    } else if (finalAction === 'hardDelete') {
+      const urls = await db.video2Items.batchHardDelete(numIds);
       await deleteOssFiles(urls);
-      changes = ids.length;
-    } else if (operation === 'changeScene') {
-      changes = await db.video2Items.batchChangeScene(ids, sceneId !== undefined && sceneId !== null ? parseInt(sceneId) : null);
+      changes = numIds.length;
+    } else if (finalAction === 'changeScene') {
+      changes = await db.video2Items.batchChangeScene(numIds, sceneId !== undefined && sceneId !== null ? parseInt(sceneId) : null);
     } else {
-      return res.status(400).json({ success: false, message: '不支持的操作: ' + operation });
+      return res.status(400).json({ success: false, message: '不支持的操作: ' + finalAction });
     }
     res.json({ success: true, changes });
   } catch (error) {
@@ -2784,11 +2797,11 @@ app.get('/api/video2/projects', async (req, res) => {
 // POST /api/video2/projects —— 新建项目
 app.post('/api/video2/projects', express.json({ limit: '1mb' }), async (req, res) => {
   try {
-    const { name, description } = req.body;
+    const { name, description, coverUrl } = req.body;
     if (!name || !name.trim()) {
       return res.status(400).json({ success: false, message: '项目名称不能为空' });
     }
-    const project = await db.video2Projects.create({ name: name.trim(), description: description || '' });
+    const project = await db.video2Projects.create({ name: name.trim(), description: description || '', coverUrl });
     console.log(`[video2] 新建项目: ${name}`);
     res.json({ success: true, data: project });
   } catch (error) {
