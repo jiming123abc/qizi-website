@@ -483,7 +483,7 @@ export function Video2ProjectList() {
                   {/* 底部渐变遮罩，增强文字对比度 */}
                   <div className="absolute inset-0 bg-gradient-to-t from-slate-900/90 via-slate-900/10 to-transparent pointer-events-none" />
 
-                  {/* 视频条目：中央播放按钮叠加层（点击打开全屏弹窗播放） */}
+                  {/* 视频条目：点击播放并跳转到项目详情 */}
                   {current && current.type === 'video' && (
                     <button
                       onClick={(e) => {
@@ -491,7 +491,7 @@ export function Video2ProjectList() {
                         setFullscreenItem(current);
                         setFullscreenTitle(project.name);
                       }}
-                      className="absolute inset-0 flex items-center justify-center"
+                      className="absolute inset-0 flex items-center justify-center z-20"
                     >
                       <div className="w-14 h-14 rounded-full border-2 border-white/70 bg-black/40 backdrop-blur flex items-center justify-center hover:from-violet-500 hover:to-fuchsia-500 hover:bg-gradient-to-br transition">
                         <Play className="w-6 h-6 text-white fill-white ml-0.5" />
