@@ -453,13 +453,20 @@ export function Video2ProjectList() {
                   {/* 底部渐变遮罩，增强文字对比度 */}
                   <div className="absolute inset-0 bg-gradient-to-t from-slate-900/90 via-slate-900/10 to-transparent pointer-events-none" />
 
-                  {/* 视频条目：中央播放按钮叠加层 */}
+                  {/* 视频条目：中央播放按钮叠加层（点击打开全屏弹窗播放） */}
                   {current && current.type === 'video' && (
-                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                      <div className="w-14 h-14 rounded-full border-2 border-white/70 bg-black/40 backdrop-blur flex items-center justify-center">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setFullscreenItem(current);
+                        setFullscreenTitle(project.name);
+                      }}
+                      className="absolute inset-0 flex items-center justify-center"
+                    >
+                      <div className="w-14 h-14 rounded-full border-2 border-white/70 bg-black/40 backdrop-blur flex items-center justify-center hover:from-violet-500 hover:to-fuchsia-500 hover:bg-gradient-to-br transition">
                         <Play className="w-6 h-6 text-white fill-white ml-0.5" />
                       </div>
-                    </div>
+                    </button>
                   )}
 
                   {/* 左右切换按钮（仅当有多个媒体时） */}
@@ -496,15 +503,15 @@ export function Video2ProjectList() {
                     </div>
                   )}
 
-                  {/* 右上：全屏预览 */}
-                  {current && (
+                  {/* 右下：全屏预览（避免与右上分享/删除按钮重叠） */}
+                  {current && current.type !== 'video' && (
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
                         setFullscreenItem(current);
                         setFullscreenTitle(project.name);
                       }}
-                      className="absolute top-3 right-3 z-20 w-9 h-9 rounded-full border border-white/20 bg-white/5 backdrop-blur hover:bg-white/15 flex items-center justify-center transition"
+                      className="absolute bottom-3 right-3 z-20 w-9 h-9 rounded-full border border-white/20 bg-black/50 backdrop-blur hover:bg-white/15 flex items-center justify-center transition"
                       title="全屏预览"
                     >
                       <Maximize2 className="w-4 h-4 text-white/80" />

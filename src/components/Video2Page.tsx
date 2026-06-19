@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Upload, Play, CheckCircle2, Trash2, X, FileVideo, Maximize2, Share2, Plus, ArrowLeft, RotateCcw, Image as ImageIcon, Link2, Check } from 'lucide-react';
+import { Upload, Play, CheckCircle2, Trash2, X, FileVideo, Maximize2, Share2, Plus, ArrowLeft, RotateCcw, Image as ImageIcon, Link2, Check, GripVertical } from 'lucide-react';
 import { setupShareMetadata, copyToClipboard, isWeChat as checkIsWeChat } from '../lib/shareUtils';
 import { uploadVideo2Image, uploadVideo2Video, uploadVideo2FromUrl, detectFileType } from '../lib/ossUtils';
 import { ShareHint } from './WeChatShareHint';
@@ -222,7 +222,7 @@ export function Video2Page({ projectId }: Video2PageProps) {
   const toggleStatus = async (item: MediaItem) => {
     const newStatus = item.status === 'pending' ? 'done' : 'pending';
     try {
-      await fetch(`/api/video2/videos/${item.id}/status`, {
+      await fetch(`/api/video2/${item.id}/status`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: newStatus })
@@ -240,7 +240,7 @@ export function Video2Page({ projectId }: Video2PageProps) {
   // ============ 删除 / 恢复 ============
   const softDelete = async (id: number) => {
     try {
-      await fetch(`/api/video2/videos/${id}`, { method: 'DELETE' });
+      await fetch(`/api/video2/${id}`, { method: 'DELETE' });
       setItems(prev => prev.filter(it => it.id !== id));
       await loadStats();
       showToast('已移到垃圾桶');
@@ -658,8 +658,6 @@ export function Video2Page({ projectId }: Video2PageProps) {
     return (
       <div
         key={item.id}
-        draggable={currentTab !== 'trash'}
-        onDragStart={() => handleItemDragStart(item.id)}
         onDragOver={(e) => handleItemDragOver(e, item.id)}
         onDragLeave={() => setDragOverItemId(null)}
         onDrop={(e) => { e.preventDefault(); handleItemDrop(item.id); }}
@@ -667,10 +665,22 @@ export function Video2Page({ projectId }: Video2PageProps) {
           isDraggingThis ? 'opacity-40 scale-95 border-violet-400/60' : 'border-white/10 hover:border-violet-400/30'
         } ${isDragOverThis && !isDraggingThis ? 'ring-2 ring-violet-400/60 border-violet-400/50 -translate-y-0.5' : ''}`}
       >
-        {/* 左上：批量复选框 */}
+        {/* 左上：拖拽手柄（六个点）—— 仅非垃圾桶 tab 显示 */}
+        {currentTab !== 'trash' && (
+          <div
+            draggable
+            onDragStart={(e) => { handleItemDragStart(item.id); e.dataTransfer.effectAllowed = 'move'; }}
+            className="absolute top-3 left-3 z-20 w-8 h-8 rounded-full border border-white/25 bg-white/5 hover:bg-white/15 hover:text-violet-200 flex items-center justify-center transition cursor-grab active:cursor-grabbing text-white/70"
+            title="拖拽排序"
+          >
+            <GripVertical className="w-4 h-4" />
+          </div>
+        )}
+
+        {/* 左中：批量复选框（位于手柄右侧，避免重叠） */}
         <button
           onClick={(e) => { e.stopPropagation(); toggleSelect(item.id); }}
-          className={`absolute top-3 left-3 z-20 w-7 h-7 rounded-full border flex items-center justify-center transition text-xs ${
+          className={`absolute top-3 ${currentTab !== 'trash' ? 'left-[52px]' : 'left-3'} z-20 w-8 h-8 rounded-full border flex items-center justify-center transition text-xs ${
             isSelected
               ? 'border-violet-400 bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white'
               : 'border-white/25 bg-black/50 text-white/70 hover:bg-black/70'
@@ -680,10 +690,10 @@ export function Video2Page({ projectId }: Video2PageProps) {
           {isSelected ? <Check className="w-4 h-4" /> : null}
         </button>
 
-        {/* 媒体区：点击进入全屏预览（避免移动端视频播放导致 poster 丢失） */}
+        {/* 媒体区：点击进入全屏预览 */}
         <div
           className="relative aspect-video bg-black/40 overflow-hidden cursor-pointer"
-          style={{ minHeight: 180 }}
+          style={{ minHeight: 200 }}
           onClick={(e) => { e.stopPropagation(); setFullscreenItem(item); }}
         >
           {isImage ? (
@@ -701,7 +711,7 @@ export function Video2Page({ projectId }: Video2PageProps) {
                 className="w-full h-full object-cover"
                 onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }}
               />
-              {/* 播放按钮叠加层（仅视频） */}
+              {/* 中央播放按钮叠加层（仅视频） */}
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                 <div className="w-14 h-14 rounded-full border-2 border-violet-400/70 bg-black/40 backdrop-blur flex items-center justify-center">
                   <Play className="w-6 h-6 text-violet-100 fill-violet-100 ml-0.5" />
@@ -710,16 +720,16 @@ export function Video2Page({ projectId }: Video2PageProps) {
             </>
           )}
 
-          {/* 右上角：全屏 */}
+          {/* 右上角：全屏查看按钮（尺寸与其他按钮一致） */}
           <button
             onClick={(e) => { e.stopPropagation(); setFullscreenItem(item); }}
-            className="absolute top-3 right-3 z-20 w-8 h-8 rounded-full border border-violet-400/40 bg-white/5 hover:bg-gradient-to-br hover:from-violet-500 hover:to-fuchsia-500 hover:border-transparent flex items-center justify-center transition"
+            className="absolute top-3 right-3 z-20 w-9 h-9 rounded-full border border-violet-400/40 bg-white/5 hover:bg-gradient-to-br hover:from-violet-500 hover:to-fuchsia-500 hover:border-transparent flex items-center justify-center transition"
             title="全屏查看"
           >
             <Maximize2 className="w-4 h-4 text-white/90" />
           </button>
 
-          {/* 左下角：未拍摄/已拍摄 圆圈复选 */}
+          {/* 左下角：未拍摄/已拍摄 状态按钮 */}
           {currentTab !== 'trash' && (
             <button
               onClick={(e) => { e.stopPropagation(); toggleStatus(item); }}
@@ -822,9 +832,9 @@ export function Video2Page({ projectId }: Video2PageProps) {
             <ArrowLeft className="w-4 h-4" />
           </button>
           <div className="flex-1 min-w-0">
-            <h1 className="text-base sm:text-xl font-bold truncate">{project?.name || '项目'}</h1>
+            <h1 className="text-lg sm:text-2xl font-bold truncate">{project?.name || ''}</h1>
             {project?.description && (
-              <p className="text-xs text-slate-400 hidden sm:block truncate">{project.description}</p>
+              <p className="text-xs sm:text-sm text-slate-400 hidden sm:block truncate mt-0.5">{project.description}</p>
             )}
           </div>
           <button
@@ -844,10 +854,10 @@ export function Video2Page({ projectId }: Video2PageProps) {
           </button>
         </div>
 
-        {/* 场次 Tab 栏（支持拖拽，未分类固定在最后） */}
+        {/* 场次 Tab 栏（仅当前选中的场次显示六个点手柄，点击手柄拖拽排序） */}
         <div className="max-w-7xl mx-auto px-4 sm:px-6 pb-3 overflow-x-auto">
           <div className="flex items-center gap-2 min-w-max">
-            {/* 自定义场次 tabs —— 可拖拽 */}
+            {/* 自定义场次 tabs —— 仅选中项显示拖拽手柄 */}
             {sortedScenes.map(scene => {
               const isActive = currentSceneId === scene.id;
               const isDragOverScene = dragOverSceneId === scene.id && dragSceneId !== scene.id;
@@ -855,14 +865,23 @@ export function Video2Page({ projectId }: Video2PageProps) {
               return (
                 <div
                   key={scene.id}
-                  draggable
-                  onDragStart={() => handleSceneDragStart(scene.id)}
                   onDragOver={(e) => handleSceneDragOver(e, scene.id)}
                   onDragLeave={() => setDragOverSceneId(null)}
                   onDrop={(e) => { e.preventDefault(); handleSceneDrop(scene.id); }}
                   onContextMenu={(e) => { e.preventDefault(); setShowRenameSceneId(scene.id); setRenameSceneName(scene.name); }}
-                  className={`relative group ${isDraggingScene ? 'opacity-50' : ''}`}
+                  className={`relative group flex items-center gap-1.5 ${isDraggingScene ? 'opacity-50' : ''}`}
                 >
+                  {/* 仅当前选中的场次显示六个点拖拽手柄 */}
+                  {isActive && (
+                    <div
+                      draggable
+                      onDragStart={(e) => { handleSceneDragStart(scene.id); e.dataTransfer.effectAllowed = 'move'; }}
+                      className="w-6 h-7 rounded-md border border-white/20 bg-white/5 hover:bg-white/15 hover:text-violet-200 flex items-center justify-center transition cursor-grab active:cursor-grabbing text-white/70 shrink-0"
+                      title="拖拽排序"
+                    >
+                      <GripVertical className="w-3.5 h-3.5" />
+                    </div>
+                  )}
                   <button
                     onClick={() => { setCurrentSceneId(scene.id); setSelectedIds(new Set()); }}
                     className={`px-3 sm:px-4 py-1.5 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap border transition ${
@@ -870,7 +889,7 @@ export function Video2Page({ projectId }: Video2PageProps) {
                         ? 'bg-gradient-to-br from-violet-500 to-fuchsia-500 border-transparent text-white shadow-lg shadow-violet-500/25'
                         : 'border-white/15 bg-white/5 text-slate-300 hover:bg-white/10'
                     } ${isDragOverScene ? 'ring-2 ring-violet-400/70' : ''}`}
-                    title="拖拽排序 · 右键重命名/删除"
+                    title={isActive ? '点击切换 · 拖拽六个点排序 · 右键重命名' : '点击切换场次 · 右键重命名/删除'}
                   >
                     {scene.name}
                   </button>
@@ -901,33 +920,31 @@ export function Video2Page({ projectId }: Video2PageProps) {
             </button>
           </div>
         </div>
-      </div>
 
-      {/* 主体内容 */}
-      <div ref={containerRef} className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
-        {/* 批量操作栏 */}
+        {/* 批量操作栏（sticky，滚动常驻） */}
         {selectedIds.size > 0 && (
-          <div className="mb-4 p-3 rounded-2xl border border-violet-400/30 bg-violet-500/10 backdrop-blur flex items-center gap-2 flex-wrap">
-            <button
-              onClick={selectAll}
-              className="px-3 py-1.5 rounded-full text-xs border border-white/20 bg-white/5 hover:bg-white/10 transition"
-            >
-              全选 {items.length}
-            </button>
-            <span className="text-xs text-slate-300">已选 {selectedIds.size}</span>
-            <span className="flex-1" />
-            {currentTab === 'trash' ? (
-              <>
-                <button
-                  onClick={batchRestore}
-                  className="px-3 py-1.5 rounded-full text-xs border border-white/20 bg-white/5 hover:bg-white/10 transition"
-                >
-                  <RotateCcw className="w-3.5 h-3.5 inline mr-1" /> 恢复
-                </button>
-                <button
-                  onClick={batchHardDelete}
-                  className="px-3 py-1.5 rounded-full text-xs border border-red-400/30 bg-red-500/10 hover:bg-red-500/20 text-red-200 transition"
-                >
+          <div className="border-t border-white/10 bg-slate-900/75 backdrop-blur">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 py-2.5 flex items-center gap-2 flex-wrap">
+              <button
+                onClick={selectAll}
+                className="px-3 py-1.5 rounded-full text-xs border border-white/20 bg-white/5 hover:bg-white/10 transition"
+              >
+                全选 {items.length}
+              </button>
+              <span className="text-xs text-slate-300">已选 {selectedIds.size}</span>
+              <span className="flex-1" />
+              {currentTab === 'trash' ? (
+                <>
+                  <button
+                    onClick={batchRestore}
+                    className="px-3 py-1.5 rounded-full text-xs border border-white/20 bg-white/5 hover:bg-white/10 transition"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5 inline mr-1" /> 恢复
+                  </button>
+                  <button
+                    onClick={batchHardDelete}
+                    className="px-3 py-1.5 rounded-full text-xs border border-red-400/30 bg-red-500/10 hover:bg-red-500/20 text-red-200 transition"
+                  >
                   <Trash2 className="w-3.5 h-3.5 inline mr-1" /> 彻底删除
                 </button>
               </>
@@ -947,9 +964,13 @@ export function Video2Page({ projectId }: Video2PageProps) {
                 </button>
               </>
             )}
+            </div>
           </div>
         )}
+      </div>
 
+      {/* 主体内容 */}
+      <div ref={containerRef} className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
         {/* 媒体卡片网格 */}
         {items.length === 0 ? (
           <div className="py-16 text-center border border-dashed border-white/10 rounded-3xl bg-white/[0.02]">
