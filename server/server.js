@@ -2579,15 +2579,24 @@ app.get('/api/video2/list', async (req, res) => {
 });
 
 // GET /api/video2/stats —— 包含 pending / done / trash 数量
+// 可选参数 sceneId（支持字符串 "null" 表示"未分类"）。
+// pending/done 仅统计当前场次（或未分类）下未删除素材；trash 统计整个项目所有软删除。
 app.get('/api/video2/stats', async (req, res) => {
   try {
-    const { projectId } = req.query;
+    const { projectId, sceneId } = req.query;
     let stats;
     if (projectId !== undefined) {
-      // 按项目统计
-      const pending = await db.video2Items.getByFilter({ projectId: parseInt(projectId), status: 'pending', deleted: 0 });
-      const done = await db.video2Items.getByFilter({ projectId: parseInt(projectId), status: 'done', deleted: 0 });
-      const trash = await db.video2Items.getByFilter({ projectId: parseInt(projectId), deleted: 1 });
+      const pid = parseInt(projectId);
+      const sceneFilter = (sceneId !== undefined)
+        ? { sceneId: sceneId === 'null' ? null : parseInt(sceneId) }
+        : {};
+      const pending = await db.video2Items.getByFilter({
+        projectId: pid, status: 'pending', deleted: 0, ...sceneFilter
+      });
+      const done = await db.video2Items.getByFilter({
+        projectId: pid, status: 'done', deleted: 0, ...sceneFilter
+      });
+      const trash = await db.video2Items.getByFilter({ projectId: pid, deleted: 1 });
       stats = { pending: pending.length, done: done.length, trash: trash.length, total: pending.length + done.length };
     } else {
       stats = await db.video2Items.getStats();
@@ -2806,6 +2815,30 @@ app.post('/api/video2/projects', express.json({ limit: '1mb' }), async (req, res
     res.json({ success: true, data: project });
   } catch (error) {
     console.error('[video2] 新建项目失败:', error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET /api/video2/projects/:id —— 单个项目详情（统一返回 name 字段）
+app.get('/api/video2/projects/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const project = await db.video2Projects.getById(id);
+    if (!project) return res.status(404).json({ success: false, message: '项目不存在' });
+    const origin = `${req.protocol}://${req.get('host')}`;
+    // 统一 key 为 name（同时兼容 title 字段，避免旧前端空字段）
+    const safeName = project.name || project.title || '未命名项目';
+    res.json({
+      success: true,
+      data: {
+        ...project,
+        name: safeName,
+        title: safeName,
+        shareUrl: `${origin}/share/video2/project/${project.id}`
+      }
+    });
+  } catch (error) {
+    console.error('[video2] 获取项目详情失败:', error.message);
     res.status(500).json({ success: false, message: error.message });
   }
 });

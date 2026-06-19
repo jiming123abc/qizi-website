@@ -112,16 +112,56 @@ export function Video2Page({ projectId }: Video2PageProps) {
 
   const [fullscreenItem, setFullscreenItem] = useState<MediaItem | null>(null);
 
+  // 互斥播放：当前正在卡片内播放的 item id
+  const [playingItemId, setPlayingItemId] = useState<number | null>(null);
+  // 用户手动暂停过的 item，自动播放逻辑会尊重它
+  const userPausedIdsRef = useRef<Set<number>>(new Set());
+
+  // 移动端自定义拖拽（touch）
+  const touchDragRef = useRef<{
+    itemId: number | null;
+    startX: number;
+    startY: number;
+    moved: boolean;
+    targetId: number | null;
+  }>({ itemId: null, startX: 0, startY: 0, moved: false, targetId: null });
+
   // ============ 数据加载 ============
   const loadProject = useCallback(async () => {
     try {
       const res = await fetch(`/api/video2/projects/${projectId}`);
       const data = await res.json();
-      if (data.success) setProject(data.data);
+      if (data.success) {
+        // 统一 name 字段：后端现在也会返回 name 和 title
+        const raw = data.data || {};
+        const name = (raw.name && String(raw.name).trim()) ||
+                     (raw.title && String(raw.title).trim()) ||
+                     '未命名项目';
+        setProject({ ...raw, name });
+      }
     } catch (e) {
       console.error('加载项目信息失败:', e);
     }
   }, [projectId]);
+
+  // 项目名称就地重命名
+  const updateProjectName = async (newName: string) => {
+    const name = newName.trim();
+    if (!name || !project) return;
+    try {
+      const res = await fetch(`/api/video2/projects/${projectId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name })
+      });
+      const data = await res.json();
+      if (data.success !== false) {
+        setProject({ ...project, name });
+      }
+    } catch (e) {
+      console.error('更新项目名称失败:', e);
+    }
+  };
 
   const loadScenes = useCallback(async () => {
     try {
@@ -165,7 +205,12 @@ export function Video2Page({ projectId }: Video2PageProps) {
 
   const loadStats = useCallback(async () => {
     try {
-      const res = await fetch(`/api/video2/stats?projectId=${projectId}`);
+      const params = new URLSearchParams();
+      params.set('projectId', String(projectId));
+      // 携带当前场次：pending/done 仅统计此场次下素材，trash 按项目统计
+      if (currentSceneId === null) params.set('sceneId', 'null');
+      else if (currentSceneId !== null) params.set('sceneId', String(currentSceneId));
+      const res = await fetch(`/api/video2/stats?${params.toString()}`);
       const data = await res.json();
       if (data.success) {
         const s = data.data || {};
@@ -174,7 +219,7 @@ export function Video2Page({ projectId }: Video2PageProps) {
     } catch (e) {
       console.error('加载统计失败:', e);
     }
-  }, [projectId]);
+  }, [projectId, currentSceneId]);
 
   const refreshAll = useCallback(async () => {
     await Promise.all([loadProject(), loadScenes(), loadItems(), loadStats()]);
@@ -202,7 +247,82 @@ export function Video2Page({ projectId }: Video2PageProps) {
   useEffect(() => {
     loadItems();
     loadStats();
+    // 切换 tab 时停止当前播放
+    setPlayingItemId(null);
   }, [currentSceneId, currentTab, loadItems, loadStats]);
+
+  // ============ 移动端自动播放：IntersectionObserver 检测可见面积最大的视频卡片 ============
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    // 只在触摸设备/手机生效（避免桌面端干扰用户手动播放）
+    const isTouch =
+      ('ontouchstart' in window) ||
+      (navigator.maxTouchPoints && navigator.maxTouchPoints > 0);
+    if (!isTouch) return;
+
+    // 只在当前 tab 是 pending/done 时启用（垃圾桶不预览视频）
+    if (currentTab === 'trash') return;
+
+    const visibility = new Map<number, number>(); // itemId -> 可见面积
+
+    // 基于当前 items 列表，每隔一段时间评估一次面积最大的 item
+    let rafId = 0;
+    const evaluate = () => {
+      rafId = 0;
+      if (items.length === 0) return;
+      let bestId: number | null = null;
+      let bestArea = 0;
+      for (const it of items) {
+        const area = visibility.get(it.id) || 0;
+        if (area > bestArea) {
+          bestArea = area;
+          bestId = it.id;
+        }
+      }
+      // 阈值：卡片面积至少有 10000 px²（约 100x100）才认为"正在显示"
+      const minArea = 10000;
+      if (bestArea >= minArea && bestId !== null) {
+        setPlayingItemId((prev) => (prev === bestId ? prev : bestId));
+      } else {
+        setPlayingItemId(null);
+      }
+    };
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const idAttr = (entry.target as HTMLElement).getAttribute('data-item-id');
+          if (!idAttr) continue;
+          const id = Number(idAttr);
+          if (!Number.isFinite(id)) continue;
+          // 计算可见面积：boundingClientRect 面积 * intersectionRatio
+          const rect = entry.boundingClientRect;
+          const area = rect.width * rect.height * entry.intersectionRatio;
+          visibility.set(id, area);
+        }
+        if (!rafId) rafId = window.requestAnimationFrame(evaluate);
+      },
+      { threshold: [0, 0.1, 0.25, 0.5, 0.75, 1] }
+    );
+
+    // 初始扫描：所有带 data-item-id 的卡片
+    const scan = () => {
+      visibility.clear();
+      const nodes = document.querySelectorAll('[data-item-id]');
+      nodes.forEach((n) => observer.observe(n));
+      if (!rafId) rafId = window.requestAnimationFrame(evaluate);
+    };
+
+    // 延迟一点再扫描，让 DOM 挂载完成
+    const scanTimer = window.setTimeout(scan, 200);
+
+    return () => {
+      window.clearTimeout(scanTimer);
+      observer.disconnect();
+      if (rafId) window.cancelAnimationFrame(rafId);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, currentTab]);
 
   // ============ 标题编辑 ============
   const updateTitle = async (id: number, title: string) => {
@@ -654,54 +774,61 @@ export function Video2Page({ projectId }: Video2PageProps) {
     const isImage = item.type === 'image';
     const isDraggingThis = dragItemId === item.id;
     const isDragOverThis = dragOverItemId === item.id;
+    const isPlaying = playingItemId === item.id;
+
+    // 桌面端 HTML5 拖拽：绑定到拖拽手柄
+    const onHandleDragStart = (e: React.DragEvent) => {
+      handleItemDragStart(item.id);
+      try { e.dataTransfer.effectAllowed = 'move'; } catch (_) {}
+    };
+
+    // 移动端 touch 拖拽（手动实现）
+    const onHandleTouchStart = (e: React.TouchEvent) => {
+      const t = e.touches[0];
+      touchDragRef.current = {
+        itemId: item.id,
+        startX: t.clientX,
+        startY: t.clientY,
+        moved: false,
+        targetId: null
+      };
+      setDragItemId(item.id);
+    };
 
     return (
       <div
         key={item.id}
+        data-item-id={String(item.id)}
         onDragOver={(e) => handleItemDragOver(e, item.id)}
         onDragLeave={() => setDragOverItemId(null)}
         onDrop={(e) => { e.preventDefault(); handleItemDrop(item.id); }}
         className={`relative rounded-2xl border bg-white/[0.03] overflow-hidden transition-all ${
-          isDraggingThis ? 'opacity-40 scale-95 border-violet-400/60' : 'border-white/10 hover:border-violet-400/30'
+          isDraggingThis ? 'opacity-40 border-violet-400/60 ring-2 ring-violet-400/40' : 'border-white/10 hover:border-violet-400/30'
         } ${isDragOverThis && !isDraggingThis ? 'ring-2 ring-violet-400/60 border-violet-400/50 -translate-y-0.5' : ''}`}
       >
-        {/* 左上：拖拽手柄（六个点）—— 仅非垃圾桶 tab 显示 */}
-        {currentTab !== 'trash' && (
-          <div
-            draggable
-            onDragStart={(e) => { handleItemDragStart(item.id); e.dataTransfer.effectAllowed = 'move'; }}
-            className="absolute top-3 left-3 z-20 w-8 h-8 rounded-full border border-white/25 bg-white/5 hover:bg-white/15 hover:text-violet-200 flex items-center justify-center transition cursor-grab active:cursor-grabbing text-white/70"
-            title="拖拽排序"
-          >
-            <GripVertical className="w-4 h-4" />
-          </div>
-        )}
-
-        {/* 左中：批量复选框（位于手柄右侧，避免重叠） */}
-        <button
-          onClick={(e) => { e.stopPropagation(); toggleSelect(item.id); }}
-          className={`absolute top-3 ${currentTab !== 'trash' ? 'left-[52px]' : 'left-3'} z-20 w-8 h-8 rounded-full border flex items-center justify-center transition text-xs ${
-            isSelected
-              ? 'border-violet-400 bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white'
-              : 'border-white/25 bg-black/50 text-white/70 hover:bg-black/70'
-          }`}
-          title="选择"
-        >
-          {isSelected ? <Check className="w-4 h-4" /> : null}
-        </button>
-
-        {/* 媒体区：点击进入全屏预览 */}
+        {/* 媒体区：图片点击弹窗；视频点击中央播放按钮直接在卡片内播放 */}
         <div
-          className="relative aspect-video bg-black/40 overflow-hidden cursor-pointer"
+          className="relative aspect-video bg-black/40 overflow-hidden"
           style={{ minHeight: 200 }}
-          onClick={(e) => { e.stopPropagation(); setFullscreenItem(item); }}
         >
           {isImage ? (
             <img
               src={item.url}
               alt={item.title}
-              className="w-full h-full object-cover"
+              className="w-full h-full object-cover cursor-pointer"
               onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }}
+              onClick={(e) => { e.stopPropagation(); setFullscreenItem(item); }}
+            />
+          ) : isPlaying ? (
+            <video
+              src={item.url}
+              autoPlay
+              muted
+              playsInline
+              loop
+              controls
+              className="w-full h-full object-contain bg-black"
+              onEnded={() => setPlayingItemId(null)}
             />
           ) : (
             <>
@@ -711,25 +838,38 @@ export function Video2Page({ projectId }: Video2PageProps) {
                 className="w-full h-full object-cover"
                 onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }}
               />
-              {/* 中央播放按钮叠加层（仅视频） */}
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <div className="w-14 h-14 rounded-full border-2 border-violet-400/70 bg-black/40 backdrop-blur flex items-center justify-center">
-                  <Play className="w-6 h-6 text-violet-100 fill-violet-100 ml-0.5" />
-                </div>
-              </div>
+              {/* 中央播放按钮（可点击） */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  // 互斥：仅一个卡片播放
+                  setPlayingItemId(item.id);
+                  userPausedIdsRef.current.delete(item.id);
+                }}
+                className="absolute inset-0 flex items-center justify-center m-auto w-16 h-16 rounded-full border-2 border-violet-400/70 bg-black/40 backdrop-blur hover:from-violet-500 hover:to-fuchsia-500 hover:bg-gradient-to-br text-white transition-all"
+                style={{ top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }}
+                title="在卡片内播放"
+              >
+                <Play className="w-7 h-7 text-white fill-white ml-0.5" />
+              </button>
             </>
           )}
 
-          {/* 右上角：全屏查看按钮（尺寸与其他按钮一致） */}
+          {/* 右上角：全屏查看按钮 */}
           <button
-            onClick={(e) => { e.stopPropagation(); setFullscreenItem(item); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              // 进入全屏弹窗时，停止卡片内播放
+              setPlayingItemId(null);
+              setFullscreenItem(item);
+            }}
             className="absolute top-3 right-3 z-20 w-9 h-9 rounded-full border border-violet-400/40 bg-white/5 hover:bg-gradient-to-br hover:from-violet-500 hover:to-fuchsia-500 hover:border-transparent flex items-center justify-center transition"
             title="全屏查看"
           >
             <Maximize2 className="w-4 h-4 text-white/90" />
           </button>
 
-          {/* 左下角：未拍摄/已拍摄 状态按钮 */}
+          {/* 左下角：未拍摄/已拍摄 状态按钮（仅非垃圾桶显示） */}
           {currentTab !== 'trash' && (
             <button
               onClick={(e) => { e.stopPropagation(); toggleStatus(item); }}
@@ -757,7 +897,7 @@ export function Video2Page({ projectId }: Video2PageProps) {
 
         {/* 下方操作区 */}
         <div className="p-3 sm:p-4">
-          {/* 标题 */}
+          {/* 标题（可编辑） */}
           <div className="mb-3">
             <input
               type="text"
@@ -774,12 +914,39 @@ export function Video2Page({ projectId }: Video2PageProps) {
             />
           </div>
 
-          {/* 底部操作行 */}
+          {/* 底部操作行：左侧——拖拽手柄（无外圈）+ 选择勾选；右侧——镜头编号/删除 */}
           <div className="flex items-center justify-between gap-2">
-            <div className="text-xs text-slate-400">
-              {currentTab === 'trash'
-                ? `删除于 ${timeAgo(item.deletedAt || item.updatedAt)}`
-                : `镜头 ${index + 1}`}
+            <div className="flex items-center gap-2">
+              {/* 拖拽手柄（左下角）：无外圈边框，仅图标 + hover 态，桌面端 draggable，移动端 touch*/}
+              {currentTab !== 'trash' && (
+                <div
+                  draggable
+                  onDragStart={onHandleDragStart}
+                  onDragEnd={() => { setDragItemId(null); setDragOverItemId(null); }}
+                  onTouchStart={onHandleTouchStart}
+                  className="w-8 h-8 rounded-full bg-white/[0.02] hover:bg-white/10 text-white/70 hover:text-violet-200 flex items-center justify-center transition cursor-grab active:cursor-grabbing select-none"
+                  title="拖拽排序"
+                >
+                  <GripVertical className="w-4 h-4" />
+                </div>
+              )}
+              {/* 批量选择勾：无外圈边框（仅选中态有彩色背景） */}
+              <button
+                onClick={(e) => { e.stopPropagation(); toggleSelect(item.id); }}
+                className={`w-8 h-8 rounded-full flex items-center justify-center transition text-xs ${
+                  isSelected
+                    ? 'bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white'
+                    : 'bg-white/[0.02] text-white/40 hover:text-white/80 hover:bg-white/10'
+                }`}
+                title="选择"
+              >
+                {isSelected ? <Check className="w-4 h-4" /> : <span className="w-3 h-3 rounded-full border border-white/30" />}
+              </button>
+              <div className="text-xs text-slate-400">
+                {currentTab === 'trash'
+                  ? `删除于 ${timeAgo(item.deletedAt || item.updatedAt)}`
+                  : `镜头 ${index + 1}`}
+              </div>
             </div>
 
             {currentTab === 'trash' ? (
@@ -820,8 +987,51 @@ export function Video2Page({ projectId }: Video2PageProps) {
   // 按 sortOrder 排序后的场景列表
   const sortedScenes = [...scenes].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
 
+  // 上传按钮是否可用
+  const uploadAvailable = currentTab === 'pending';
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-violet-950 to-pink-950 text-white pb-24">
+    <div
+      className="min-h-screen bg-gradient-to-br from-slate-900 via-violet-950 to-pink-950 text-white pb-24"
+      onTouchMove={(e) => {
+        // 自定义移动端卡片拖拽：根据手指位置命中卡片
+        const ctx = touchDragRef.current;
+        if (ctx.itemId === null) return;
+        const dx = e.touches[0].clientX - ctx.startX;
+        const dy = e.touches[0].clientY - ctx.startY;
+        if (!ctx.moved && Math.hypot(dx, dy) > 10) ctx.moved = true;
+        if (ctx.moved) {
+          e.preventDefault();
+          const el = document.elementFromPoint(e.touches[0].clientX, e.touches[0].clientY);
+          let cardEl: HTMLElement | null = el as HTMLElement | null;
+          while (cardEl && !cardEl.getAttribute('data-item-id')) {
+            cardEl = cardEl.parentElement;
+          }
+          const targetId = cardEl ? Number(cardEl.getAttribute('data-item-id')) : null;
+          if (!Number.isNaN(targetId) && targetId !== ctx.itemId) {
+            if (ctx.targetId !== targetId) {
+              ctx.targetId = targetId;
+              setDragOverItemId(targetId);
+            }
+          } else {
+            if (ctx.targetId !== null) {
+              ctx.targetId = null;
+              setDragOverItemId(null);
+            }
+          }
+        }
+      }}
+      onTouchEnd={() => {
+        const ctx = touchDragRef.current;
+        if (ctx.itemId !== null && ctx.moved && ctx.targetId !== null && ctx.targetId !== ctx.itemId) {
+          // 调用与桌面端同一 handleItemDrop 逻辑
+          handleItemDrop(ctx.targetId);
+        }
+        touchDragRef.current = { itemId: null, startX: 0, startY: 0, moved: false, targetId: null };
+        setDragItemId(null);
+        setDragOverItemId(null);
+      }}
+    >
       {/* 顶部栏 */}
       <div className="sticky top-0 z-30 backdrop-blur-xl bg-slate-900/75 border-b border-white/10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 sm:py-4 flex items-center gap-3">
@@ -832,7 +1042,21 @@ export function Video2Page({ projectId }: Video2PageProps) {
             <ArrowLeft className="w-4 h-4" />
           </button>
           <div className="flex-1 min-w-0">
-            <h1 className="text-lg sm:text-2xl font-bold truncate">{project?.name || ''}</h1>
+            <input
+              type="text"
+              defaultValue={project?.name || ''}
+              onBlur={(e) => {
+                const v = e.currentTarget.value.trim();
+                if (v && v !== project?.name) updateProjectName(v);
+                else if (!v && project) e.currentTarget.value = project.name;
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur();
+                if (e.key === 'Escape' && project) (e.currentTarget as HTMLInputElement).value = project.name;
+              }}
+              className="w-full text-lg sm:text-2xl font-bold bg-transparent border-b border-transparent hover:border-white/20 focus:border-violet-400/60 outline-none transition truncate"
+              title="点击编辑项目名称"
+            />
             {project?.description && (
               <p className="text-xs sm:text-sm text-slate-400 hidden sm:block truncate mt-0.5">{project.description}</p>
             )}
@@ -845,8 +1069,14 @@ export function Video2Page({ projectId }: Video2PageProps) {
             <Share2 className="w-4 h-4 text-white/90" />
           </button>
           <button
-            onClick={() => setShowUploadDialog(true)}
-            className="inline-flex items-center gap-2 px-3 sm:px-4 py-2 rounded-full border border-violet-400/40 bg-gradient-to-br from-violet-500 to-fuchsia-500 hover:shadow-lg hover:shadow-violet-500/30 text-white text-sm font-medium transition"
+            onClick={() => { if (uploadAvailable) setShowUploadDialog(true); }}
+            disabled={!uploadAvailable}
+            className={`inline-flex items-center gap-2 px-3 sm:px-4 py-2 rounded-full border text-sm font-medium transition ${
+              uploadAvailable
+                ? 'border-violet-400/40 bg-gradient-to-br from-violet-500 to-fuchsia-500 hover:shadow-lg hover:shadow-violet-500/30 text-white'
+                : 'border-white/10 bg-white/5 text-slate-500 cursor-not-allowed'
+            }`}
+            title={uploadAvailable ? '批量上传' : '当前 tab 不支持上传'}
           >
             <Upload className="w-4 h-4" />
             <span className="hidden sm:inline">批量上传</span>
@@ -854,10 +1084,9 @@ export function Video2Page({ projectId }: Video2PageProps) {
           </button>
         </div>
 
-        {/* 场次 Tab 栏（仅当前选中的场次显示六个点手柄，点击手柄拖拽排序） */}
+        {/* 场次 Tab 栏：六个点手柄位于 tab 按钮内（仅选中态显示），不再是独立按钮 */}
         <div className="max-w-7xl mx-auto px-4 sm:px-6 pb-3 overflow-x-auto">
           <div className="flex items-center gap-2 min-w-max">
-            {/* 自定义场次 tabs —— 仅选中项显示拖拽手柄 */}
             {sortedScenes.map(scene => {
               const isActive = currentSceneId === scene.id;
               const isDragOverScene = dragOverSceneId === scene.id && dragSceneId !== scene.id;
@@ -869,29 +1098,24 @@ export function Video2Page({ projectId }: Video2PageProps) {
                   onDragLeave={() => setDragOverSceneId(null)}
                   onDrop={(e) => { e.preventDefault(); handleSceneDrop(scene.id); }}
                   onContextMenu={(e) => { e.preventDefault(); setShowRenameSceneId(scene.id); setRenameSceneName(scene.name); }}
-                  className={`relative group flex items-center gap-1.5 ${isDraggingScene ? 'opacity-50' : ''}`}
+                  className={`relative ${isDraggingScene ? 'opacity-50' : ''}`}
                 >
-                  {/* 仅当前选中的场次显示六个点拖拽手柄 */}
-                  {isActive && (
-                    <div
-                      draggable
-                      onDragStart={(e) => { handleSceneDragStart(scene.id); e.dataTransfer.effectAllowed = 'move'; }}
-                      className="w-6 h-7 rounded-md border border-white/20 bg-white/5 hover:bg-white/15 hover:text-violet-200 flex items-center justify-center transition cursor-grab active:cursor-grabbing text-white/70 shrink-0"
-                      title="拖拽排序"
-                    >
-                      <GripVertical className="w-3.5 h-3.5" />
-                    </div>
-                  )}
                   <button
                     onClick={() => { setCurrentSceneId(scene.id); setSelectedIds(new Set()); }}
-                    className={`px-3 sm:px-4 py-1.5 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap border transition ${
+                    draggable={isActive}
+                    onDragStart={(e) => { if (isActive) { handleSceneDragStart(scene.id); try { e.dataTransfer.effectAllowed = 'move'; } catch (_) {} } }}
+                    onDragEnd={() => { setDragSceneId(null); setDragOverSceneId(null); }}
+                    className={`inline-flex items-center gap-1.5 pl-2 pr-3 sm:pr-4 py-1.5 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap border transition ${
                       isActive
                         ? 'bg-gradient-to-br from-violet-500 to-fuchsia-500 border-transparent text-white shadow-lg shadow-violet-500/25'
                         : 'border-white/15 bg-white/5 text-slate-300 hover:bg-white/10'
                     } ${isDragOverScene ? 'ring-2 ring-violet-400/70' : ''}`}
-                    title={isActive ? '点击切换 · 拖拽六个点排序 · 右键重命名' : '点击切换场次 · 右键重命名/删除'}
+                    title={isActive ? '点击切换 · 按住拖拽排序 · 右键重命名' : '点击切换场次 · 右键重命名/删除'}
                   >
-                    {scene.name}
+                    {isActive && (
+                      <GripVertical className="w-3.5 h-3.5 text-white/90 shrink-0 cursor-grab active:cursor-grabbing" />
+                    )}
+                    <span>{scene.name}</span>
                   </button>
                 </div>
               );
@@ -970,7 +1194,9 @@ export function Video2Page({ projectId }: Video2PageProps) {
       </div>
 
       {/* 主体内容 */}
-      <div ref={containerRef} className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+      <div
+        ref={containerRef}
+        className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
         {/* 媒体卡片网格 */}
         {items.length === 0 ? (
           <div className="py-16 text-center border border-dashed border-white/10 rounded-3xl bg-white/[0.02]">
@@ -980,7 +1206,7 @@ export function Video2Page({ projectId }: Video2PageProps) {
                 <p className="text-slate-300 mb-1">垃圾桶是空的</p>
                 <p className="text-xs text-slate-500">返回「未拍摄 / 已拍摄」查看素材</p>
               </>
-            ) : (
+            ) : currentTab === 'pending' ? (
               <>
                 <FileVideo className="w-10 h-10 mx-auto mb-3 text-violet-300/60" />
                 <p className="text-slate-300 mb-1">暂无素材</p>
@@ -991,6 +1217,12 @@ export function Video2Page({ projectId }: Video2PageProps) {
                 >
                   <Upload className="w-4 h-4 inline mr-1.5" /> 批量上传
                 </button>
+              </>
+            ) : (
+              <>
+                <FileVideo className="w-10 h-10 mx-auto mb-3 text-slate-400" />
+                <p className="text-slate-300 mb-1">当前场次无素材</p>
+                <p className="text-xs text-slate-500">请切换到「未拍摄」后再上传</p>
               </>
             )}
           </div>
