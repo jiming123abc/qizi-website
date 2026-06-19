@@ -961,7 +961,7 @@ export function Video2Page({ projectId }: Video2PageProps) {
         } ${isDragOverThis && !isDraggingThis ? 'ring-2 ring-violet-400/60 border-violet-400/50 -translate-y-0.5' : ''}`}
       >
         {/* 图片/视频区：所有按钮均放在此 relative 容器内 */}
-        <div className="relative aspect-video bg-black/40 overflow-hidden">
+        <div className="relative aspect-video bg-black/40 overflow-hidden media-card-video-container">
           {isImage ? (
             <img
               src={item.url}
@@ -978,7 +978,7 @@ export function Video2Page({ projectId }: Video2PageProps) {
               playsInline
               loop
               controls={false}
-              className="w-full h-full object-cover"
+              className="video-no-controls"
               onEnded={() => setPlayingItemId(null)}
               onPause={() => setPlayingItemId(prev => prev === item.id ? null : prev)}
               onPlay={() => setPlayingItemId(item.id)}
@@ -995,8 +995,17 @@ export function Video2Page({ projectId }: Video2PageProps) {
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  setPlayingItemId(item.id);
                   userPausedIdsRef.current.delete(item.id);
+                  setPlayingItemId(item.id);
+                  setTimeout(() => {
+                    const mediaContainer = e.currentTarget.closest('.aspect-video');
+                    if (mediaContainer) {
+                      const videoEl = mediaContainer.querySelector('video');
+                      if (videoEl) {
+                        videoEl.play().catch(() => {});
+                      }
+                    }
+                  }, 50);
                 }}
                 className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-20"
               >

@@ -102,4 +102,38 @@
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
+
+  .video-no-controls::-webkit-media-controls {
+    display: none !important;
+  }
+  .video-no-controls::-webkit-media-controls-enclosure {
+    display: none !important;
+  }
+  .video-no-controls::-webkit-media-controls-panel {
+    display: none !important;
+  }
+  .video-no-controls::-webkit-media-controls-play-button {
+    display: none !important;
+  }
+  .video-no-controls::-webkit-media-controls-start-playback-button {
+    display: none !important;
+  }
+
+  .media-card-video-container {
+    position: relative;
+    overflow: hidden;
+    transform: translateZ(0);
+    backface-visibility: hidden;
+  }
+
+  .media-card-video-container video {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    contain: layout paint size;
+  }
 }

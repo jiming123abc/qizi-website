@@ -602,7 +602,7 @@ export function Video2ProjectList() {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-3 text-xs text-slate-400 mt-2">
+                  <div className="flex items-center gap-3 text-xs text-slate-400 mt-1">
                     <span className="inline-flex items-center gap-1">
                       <Film className="w-3.5 h-3.5" /> {project.videoCount} 项
                     </span>
