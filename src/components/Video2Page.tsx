@@ -276,8 +276,8 @@ export function Video2Page({ projectId }: Video2PageProps) {
       (navigator.maxTouchPoints && navigator.maxTouchPoints > 0);
     if (!isTouch) return;
 
-    // 微信内不支持自动播放，跳过（统一走封面 + 点击播放路径）
-    if (checkIsWeChat()) return;
+    // 微信内支持静音自动播放（muted autoPlay），不跳过
+    // 注：有声音的视频仍然需要用户手势，仅在全屏弹窗内解除静音
 
     // 只在当前 tab 是 pending/done 时启用（垃圾桶不预览视频）
     if (currentTab === 'trash') return;
@@ -1751,6 +1751,7 @@ export function Video2Page({ projectId }: Video2PageProps) {
                 controls
                 autoPlay
                 playsInline
+                muted={false}
                 className="mx-auto max-w-full max-h-[80vh] rounded-2xl bg-black"
               />
             )}
