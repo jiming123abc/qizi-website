@@ -119,6 +119,14 @@ export function Video2Page({ projectId }: Video2PageProps) {
   const [dragOverSceneId, setDragOverSceneId] = useState<number | null>(null);
 
   const [fullscreenItem, setFullscreenItem] = useState<MediaItem | null>(null);
+  const fullscreenVideoRef = useRef<HTMLVideoElement>(null);
+
+  // 全屏弹窗打开时自动播放视频
+  useEffect(() => {
+    if (fullscreenItem && fullscreenItem.type === 'video' && fullscreenVideoRef.current) {
+      fullscreenVideoRef.current.play().catch(() => {});
+    }
+  }, [fullscreenItem]);
 
   // 互斥播放：当前正在卡片内播放的 item id
   const [playingItemId, setPlayingItemId] = useState<number | null>(null);
@@ -964,6 +972,7 @@ export function Video2Page({ projectId }: Video2PageProps) {
           ) : isPlaying ? (
             <video
               src={item.url}
+              poster={getPosterUrl(item.url)}
               autoPlay
               muted
               playsInline
@@ -1746,10 +1755,10 @@ export function Video2Page({ projectId }: Video2PageProps) {
               <img src={fullscreenItem.url} alt={fullscreenItem.title} className="mx-auto max-w-full max-h-[80vh] object-contain rounded-2xl" />
             ) : (
               <video
+                ref={fullscreenVideoRef}
                 src={fullscreenItem.url}
                 poster={getPosterUrl(fullscreenItem.url)}
                 controls
-                autoPlay
                 playsInline
                 muted={false}
                 className="mx-auto max-w-full max-h-[80vh] rounded-2xl bg-black"

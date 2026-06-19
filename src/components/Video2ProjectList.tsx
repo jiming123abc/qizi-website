@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Plus, Trash2, Share2, Film, HardDrive, ChevronRight, ChevronLeft, X, Play, Maximize2, Upload, Image as ImageIcon, Link2, CheckCircle2 } from 'lucide-react';
 import { setupShareMetadata, copyToClipboard, isWeChat } from '../lib/shareUtils';
 import { uploadVideo2Image, uploadVideo2Video, detectFileType, uploadVideo2FromUrl } from '../lib/ossUtils';
@@ -82,6 +82,14 @@ export function Video2ProjectList() {
   const [carouselIndex, setCarouselIndex] = useState<Record<number, number>>({});
   const [fullscreenItem, setFullscreenItem] = useState<ReferenceItem | null>(null);
   const [fullscreenTitle, setFullscreenTitle] = useState<string>('');
+  const fullscreenVideoRef = useRef<HTMLVideoElement>(null);
+
+  // 全屏弹窗打开时自动播放视频
+  useEffect(() => {
+    if (fullscreenItem && fullscreenItem.type === 'video' && fullscreenVideoRef.current) {
+      fullscreenVideoRef.current.play().catch(() => {});
+    }
+  }, [fullscreenItem]);
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
@@ -460,8 +468,7 @@ export function Video2ProjectList() {
 
                 {/* 封面/参考媒体区（轮播预览） */}
                 <div
-                  className="relative aspect-[16/10] cursor-pointer overflow-hidden bg-black/30"
-                  onClick={() => goToProject(project.id)}
+                  className="relative aspect-[16/10] overflow-hidden bg-black/30"
                 >
                   {(() => {
                     // 统一渲染：图片与视频都显示为图片海报
@@ -474,14 +481,18 @@ export function Video2ProjectList() {
                       <img
                         src={mediaSrc}
                         alt={project.name}
-                        className="w-full h-full object-cover"
+                        className="w-full h-full object-cover cursor-pointer"
+                        onClick={() => goToProject(project.id)}
                         onError={(ev) => { (ev.target as HTMLImageElement).src = DEFAULT_COVER; }}
                       />
                     );
                   })()}
 
                   {/* 底部渐变遮罩，增强文字对比度 */}
-                  <div className="absolute inset-0 bg-gradient-to-t from-slate-900/90 via-slate-900/10 to-transparent pointer-events-none" />
+                  <div
+                    className="absolute inset-0 bg-gradient-to-t from-slate-900/90 via-slate-900/10 to-transparent"
+                    onClick={() => goToProject(project.id)}
+                  />
 
                   {/* 视频条目：点击播放并跳转到项目详情 */}
                   {current && current.type === 'video' && (
@@ -588,7 +599,7 @@ export function Video2ProjectList() {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-3 text-xs text-slate-400 mt-3">
+                  <div className="flex items-center gap-3 text-xs text-slate-400 mt-2">
                     <span className="inline-flex items-center gap-1">
                       <Film className="w-3.5 h-3.5" /> {project.videoCount} 项
                     </span>
@@ -602,10 +613,19 @@ export function Video2ProjectList() {
                   <button
                     onClick={(e) => { e.stopPropagation(); openUploadDialog(project); }}
                     title="上传图片或视频作为项目封面 / 参考素材"
-                    className="mt-4 w-full py-2.5 rounded-2xl border border-violet-400/30 bg-violet-500/10 hover:bg-violet-500/25 hover:border-violet-400/50 transition-all text-sm font-medium inline-flex items-center justify-center gap-2 text-violet-200"
+                    className="mt-3 w-full py-2.5 rounded-2xl border border-violet-400/30 bg-violet-500/10 hover:bg-violet-500/25 hover:border-violet-400/50 transition-all text-sm font-medium inline-flex items-center justify-center gap-2 text-violet-200"
                   >
                     <Upload className="w-4 h-4" />
                     <span>上传参考视频 / 设置封面</span>
+                  </button>
+
+                  {/* 打开项目按钮 */}
+                  <button
+                    onClick={() => goToProject(project.id)}
+                    className="mt-2 w-full py-2 rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20 transition-all text-sm text-slate-300 inline-flex items-center justify-center gap-2"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                    <span>打开项目</span>
                   </button>
                 </div>
               </div>
@@ -815,10 +835,10 @@ export function Video2ProjectList() {
               <img src={fullscreenItem.url} alt={fullscreenTitle || fullscreenItem.title} className="mx-auto max-w-full max-h-[80vh] object-contain rounded-2xl" />
             ) : (
               <video
+                ref={fullscreenVideoRef}
                 src={fullscreenItem.url}
                 poster={getVideoPoster(fullscreenItem.url)}
                 controls
-                autoPlay
                 playsInline
                 className="mx-auto max-w-full max-h-[80vh] rounded-2xl bg-black"
               />
