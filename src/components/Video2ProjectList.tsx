@@ -368,7 +368,7 @@ export function Video2ProjectList() {
     }
   };
 
-  // 轮播：封面 + reference / 普通素材 合并为一个展示列表
+  // 轮播：封面 + reference 合并为一个展示列表（避免重复）
   const buildMediaList = (project: Project): ReferenceItem[] => {
     const refs = referencesCache[project.id] || [];
     const cover: ReferenceItem | null = project.coverUrl
@@ -377,8 +377,11 @@ export function Video2ProjectList() {
     if (refs.length === 0) {
       return cover ? [cover] : [];
     }
-    // 合并：封面（去重）+ 其它
-    const firstRefIsCover = cover && refs[0] && Math.abs((refs[0].url || '').length - (cover.url || '').length) < 5;
+    // 如果封面等于第一个参考素材（或其视频截图），则去重
+    const firstRef = refs[0];
+    const firstRefUrl = firstRef.url || '';
+    const firstRefPoster = firstRef.type === 'video' ? getVideoPoster(firstRef.url) || firstRefUrl : firstRefUrl;
+    const firstRefIsCover = cover && firstRef && (firstRefUrl === cover.url || firstRefPoster === cover.url);
     if (firstRefIsCover) return refs;
     return cover ? [cover, ...refs] : refs;
   };
@@ -494,7 +497,7 @@ export function Video2ProjectList() {
                     onClick={() => goToProject(project.id)}
                   />
 
-                  {/* 视频条目：点击播放并跳转到项目详情 */}
+                  {/* 视频条目：点击播放按钮后弹窗播放视频 */}
                   {current && current.type === 'video' && (
                     <button
                       onClick={(e) => {
@@ -502,7 +505,7 @@ export function Video2ProjectList() {
                         setFullscreenItem(current);
                         setFullscreenTitle(project.name);
                       }}
-                      className="absolute inset-0 flex items-center justify-center z-20"
+                      className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-20"
                     >
                       <div className="w-14 h-14 rounded-full border-2 border-white/70 bg-black/40 backdrop-blur flex items-center justify-center hover:from-violet-500 hover:to-fuchsia-500 hover:bg-gradient-to-br transition">
                         <Play className="w-6 h-6 text-white fill-white ml-0.5" />

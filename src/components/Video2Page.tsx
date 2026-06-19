@@ -284,8 +284,9 @@ export function Video2Page({ projectId }: Video2PageProps) {
       (navigator.maxTouchPoints && navigator.maxTouchPoints > 0);
     if (!isTouch) return;
 
-    // 微信内支持静音自动播放（muted autoPlay），不跳过
-    // 注：有声音的视频仍然需要用户手势，仅在全屏弹窗内解除静音
+    // 微信内不支持滚动触发自动播放（即便 muted 也需要用户点击手势
+    // 注：有声音的视频仍然需要用户手势，在全屏弹窗内解除静音
+    if (checkIsWeChat()) return;
 
     // 只在当前 tab 是 pending/done 时启用（垃圾桶不预览视频）
     if (currentTab === 'trash') return;
@@ -965,9 +966,8 @@ export function Video2Page({ projectId }: Video2PageProps) {
             <img
               src={item.url}
               alt={item.title}
-              className="w-full h-full object-cover cursor-pointer"
+              className="w-full h-full object-cover"
               onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }}
-              onClick={(e) => { e.stopPropagation(); setFullscreenItem(item); }}
             />
           ) : isPlaying ? (
             <video
@@ -978,7 +978,7 @@ export function Video2Page({ projectId }: Video2PageProps) {
               playsInline
               loop
               controls={false}
-              className="absolute inset-0 w-full h-full object-cover"
+              className="w-full h-full object-cover"
               onEnded={() => setPlayingItemId(null)}
               onPause={() => setPlayingItemId(prev => prev === item.id ? null : prev)}
               onPlay={() => setPlayingItemId(item.id)}
@@ -991,14 +991,14 @@ export function Video2Page({ projectId }: Video2PageProps) {
                 className="w-full h-full object-cover"
                 onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }}
               />
-              {/* 中央播放按钮：微信端封面态统一显示此按钮 */}
+              {/* 中央播放按钮：仅圆圈区域可点击，点击后在卡片内播放 */}
               <button
                 onClick={(e) => {
                   e.stopPropagation();
                   setPlayingItemId(item.id);
                   userPausedIdsRef.current.delete(item.id);
                 }}
-                className="absolute inset-0 flex items-center justify-center z-30"
+                className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-20"
               >
                 <div className="w-14 h-14 rounded-full border-2 border-white/70 bg-black/40 backdrop-blur flex items-center justify-center hover:from-violet-500 hover:to-fuchsia-500 hover:bg-gradient-to-br transition">
                   <Play className="w-6 h-6 text-white fill-white ml-0.5" />
