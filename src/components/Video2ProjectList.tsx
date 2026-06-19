@@ -569,18 +569,18 @@ export function Video2ProjectList() {
                         className="w-full text-lg font-semibold bg-transparent border-b border-transparent hover:border-white/20 focus:border-violet-400/60 outline-none py-0.5 transition cursor-text truncate"
                         title="点击编辑项目名称"
                       />
-                      <input
-                        type="text"
+                      <textarea
                         defaultValue={project.description || ''}
                         placeholder="点击添加描述..."
+                        rows={2}
                         onClick={(e) => e.stopPropagation()}
                         onBlur={(e) => {
                           const v = e.currentTarget.value.trim();
                           if (v !== project.description) updateProjectDescription(project.id, v);
                         }}
                         onKeyDown={(e) => {
-                          if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur();
-                          if (e.key === 'Escape' && project.description) (e.currentTarget as HTMLInputElement).value = project.description;
+                          if (e.key === 'Enter') (e.currentTarget as HTMLTextAreaElement).blur();
+                          if (e.key === 'Escape' && project.description) (e.currentTarget as HTMLTextAreaElement).value = project.description;
                         }}
                         className="w-full text-sm text-slate-400 bg-transparent border-b border-transparent hover:border-white/20 focus:border-violet-400/60 outline-none py-0.5 mt-1 line-clamp-2 transition cursor-text resize-none"
                         title="点击编辑项目描述"

@@ -718,10 +718,16 @@ function initVideo2Database() {
         coverUrl TEXT,
         isCover INTEGER DEFAULT 0,
         reference INTEGER DEFAULT 0,
+        shotNo TEXT,
         createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
         updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
+
+    // 迁移：已存在表增加 shotNo 列（忽略错误）
+    video2Db.run(`ALTER TABLE videos ADD COLUMN shotNo TEXT`, (err) => {
+      // 如果列已存在或表不存在，忽略错误
+    });
 
     // 2. 创建 projects 表
     video2Db.run(`
@@ -1086,6 +1092,13 @@ const video2Items = {
     const result = await video2Async.run(
       'UPDATE videos SET status = ?, updatedAt = CURRENT_TIMESTAMP WHERE id = ?',
       [status, id]
+    );
+    return result.changes > 0;
+  },
+  updateShotNo: async (id, shotNo) => {
+    const result = await video2Async.run(
+      'UPDATE videos SET shotNo = ?, updatedAt = CURRENT_TIMESTAMP WHERE id = ?',
+      [shotNo || null, id]
     );
     return result.changes > 0;
   },

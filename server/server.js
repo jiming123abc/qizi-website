@@ -2662,6 +2662,20 @@ app.put('/api/video2/:id/status', express.json({ limit: '1mb' }), async (req, re
   }
 });
 
+// PUT /api/video2/:id/shotNo —— 更新镜头号
+app.put('/api/video2/:id/shotNo', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const { shotNo } = req.body;
+    const ok = await db.video2Items.updateShotNo(id, shotNo);
+    if (!ok) return res.status(404).json({ success: false, message: '视频不存在' });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('[video2] 更新镜头号失败:', error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // DELETE /api/video2/:id —— 软删除（移入垃圾桶）
 app.delete('/api/video2/:id', async (req, res) => {
   try {

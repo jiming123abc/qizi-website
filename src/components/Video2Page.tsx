@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Upload, Play, CheckCircle2, Trash2, X, FileVideo, Maximize2, Share2, Plus, ArrowLeft, RotateCcw, Image as ImageIcon, Link2, Check, GripVertical, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Upload, Play, CheckCircle2, Trash2, X, FileVideo, Maximize2, Share2, Plus, ArrowLeft, RotateCcw, Image as ImageIcon, Link2, Check, GripVertical, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Settings } from 'lucide-react';
 import { setupShareMetadata, copyToClipboard, isWeChat as checkIsWeChat } from '../lib/shareUtils';
 import { uploadVideo2Image, uploadVideo2Video, uploadVideo2FromUrl, detectFileType } from '../lib/ossUtils';
 import { ShareHint } from './WeChatShareHint';
@@ -24,6 +24,7 @@ interface MediaItem {
   deletedAt?: string;
   projectId?: number;
   sceneId?: number;
+  shotNo?: string;
 }
 
 interface Scene {
@@ -99,6 +100,13 @@ export function Video2Page({ projectId }: Video2PageProps) {
     setToast(msg);
     setTimeout(() => setToast(null), 2500);
   }, []);
+
+  // 镜头号输入弹窗
+  const [showShotNoDialog, setShowShotNoDialog] = useState<MediaItem | null>(null);
+  const [shotNoInputValue, setShotNoInputValue] = useState('');
+
+  // 场次管理面板（手机端）
+  const [showSceneManager, setShowSceneManager] = useState(false);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -268,6 +276,9 @@ export function Video2Page({ projectId }: Video2PageProps) {
       (navigator.maxTouchPoints && navigator.maxTouchPoints > 0);
     if (!isTouch) return;
 
+    // 微信内不支持自动播放，跳过（统一走封面 + 点击播放路径）
+    if (checkIsWeChat()) return;
+
     // 只在当前 tab 是 pending/done 时启用（垃圾桶不预览视频）
     if (currentTab === 'trash') return;
 
@@ -366,8 +377,14 @@ export function Video2Page({ projectId }: Video2PageProps) {
   };
 
   // ============ 状态切换（点击圆圈复选框） ============
-  const toggleStatus = async (item: MediaItem) => {
+  const toggleStatus = async (item: MediaItem, skipDialog?: boolean) => {
     const newStatus = item.status === 'pending' ? 'done' : 'pending';
+    // 未拍摄 → 已拍摄：先弹出镜头号输入框
+    if (newStatus === 'done' && !skipDialog) {
+      setShotNoInputValue(item.shotNo || '');
+      setShowShotNoDialog(item);
+      return;
+    }
     try {
       await fetch(`/api/video2/${item.id}/status`, {
         method: 'PUT',
@@ -381,6 +398,50 @@ export function Video2Page({ projectId }: Video2PageProps) {
       showToast(newStatus === 'done' ? '已标记为已拍摄' : '已回到未拍摄');
     } catch (e) {
       console.error('更新状态失败:', e);
+    }
+  };
+
+  // ============ 镜头号确认（标记为已拍摄时） ============
+  const confirmShotNo = async () => {
+    if (!showShotNoDialog) return;
+    const item = showShotNoDialog;
+    const shotNo = shotNoInputValue.trim();
+    try {
+      if (shotNo) {
+        await fetch(`/api/video2/${item.id}/shotNo`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ shotNo })
+        });
+      }
+      await fetch(`/api/video2/${item.id}/status`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'done' })
+      });
+      setItems(prev => prev.filter(it => it.id !== item.id));
+      await loadStats();
+      showToast('已标记为已拍摄');
+    } catch (e) {
+      console.error('更新状态/镜头号失败:', e);
+    } finally {
+      setShowShotNoDialog(null);
+      setShotNoInputValue('');
+    }
+  };
+
+  // 更新已有项目的镜头号（已拍摄卡片上点击镜头号）
+  const updateShotNo = async (item: MediaItem, shotNo: string) => {
+    try {
+      await fetch(`/api/video2/${item.id}/shotNo`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ shotNo: shotNo.trim() })
+      });
+      setItems(prev => prev.map(it => it.id === item.id ? { ...it, shotNo: shotNo.trim() || undefined } : it));
+      showToast('镜头号已更新');
+    } catch (e) {
+      console.error('更新镜头号失败:', e);
     }
   };
 
@@ -768,22 +829,24 @@ export function Video2Page({ projectId }: Video2PageProps) {
     await loadStats();
     showToast(`上传完成（${valid.length} 项）`);
 
-    // 无条件把最新一条素材设为项目封面（视频走 OSS 截图 URL）
-    try {
-      const params = new URLSearchParams();
-      params.set('projectId', String(projectId));
-      if (currentSceneId !== null) params.set('sceneId', String(currentSceneId));
-      params.set('status', 'pending');
-      const listRes = await fetch(`/api/video2/list?${params.toString()}`);
-      const listData = await listRes.json();
-      const list: MediaItem[] = (listData.data || []) as MediaItem[];
-      if (list.length > 0) {
-        list.sort((a, b) => (b.sortOrder || 0) - (a.sortOrder || 0)); // 最新的在前
-        const latest = list[0];
-        const coverUrl = latest.type === 'video' ? getPosterUrl(latest.url) || latest.url : latest.url;
-        await setProjectCover(coverUrl);
-      }
-    } catch (e) { /* 忽略 */ }
+    // 无封面时才把最新一条素材设为项目封面（视频走 OSS 截图 URL）
+    if (!project?.coverUrl) {
+      try {
+        const params = new URLSearchParams();
+        params.set('projectId', String(projectId));
+        if (currentSceneId !== null) params.set('sceneId', String(currentSceneId));
+        params.set('status', 'pending');
+        const listRes = await fetch(`/api/video2/list?${params.toString()}`);
+        const listData = await listRes.json();
+        const list: MediaItem[] = (listData.data || []) as MediaItem[];
+        if (list.length > 0) {
+          list.sort((a, b) => (b.sortOrder || 0) - (a.sortOrder || 0)); // 最新的在前
+          const latest = list[0];
+          const coverUrl = latest.type === 'video' ? getPosterUrl(latest.url) || latest.url : latest.url;
+          await setProjectCover(coverUrl);
+        }
+      } catch (e) { /* 忽略 */ }
+    }
   };
 
   const handleUploadFromUrl = async () => {
@@ -807,22 +870,24 @@ export function Video2Page({ projectId }: Video2PageProps) {
       setUrlInputValue('');
       await loadItems();
       await loadStats();
-      // 无条件把最新一条素材设为项目封面（视频走 OSS 截图 URL）
-      try {
-        const urlParams = new URLSearchParams();
-        urlParams.set('projectId', String(projectId));
-        if (currentSceneId !== null) urlParams.set('sceneId', String(currentSceneId));
-        urlParams.set('status', 'pending');
-        const urlListRes = await fetch(`/api/video2/list?${urlParams.toString()}`);
-        const urlListData = await urlListRes.json();
-        const urlList: MediaItem[] = (urlListData.data || []) as MediaItem[];
-        if (urlList.length > 0) {
-          urlList.sort((a, b) => (b.sortOrder || 0) - (a.sortOrder || 0));
-          const latest = urlList[0];
-          const coverUrl = latest.type === 'video' ? getPosterUrl(latest.url) || latest.url : latest.url;
-          await setProjectCover(coverUrl);
-        }
-      } catch (e) { /* 忽略 */ }
+      // 无封面时才把最新一条素材设为项目封面
+      if (!project?.coverUrl) {
+        try {
+          const urlParams = new URLSearchParams();
+          urlParams.set('projectId', String(projectId));
+          if (currentSceneId !== null) urlParams.set('sceneId', String(currentSceneId));
+          urlParams.set('status', 'pending');
+          const urlListRes = await fetch(`/api/video2/list?${urlParams.toString()}`);
+          const urlListData = await urlListRes.json();
+          const urlList: MediaItem[] = (urlListData.data || []) as MediaItem[];
+          if (urlList.length > 0) {
+            urlList.sort((a, b) => (b.sortOrder || 0) - (a.sortOrder || 0));
+            const latest = urlList[0];
+            const coverUrl = latest.type === 'video' ? getPosterUrl(latest.url) || latest.url : latest.url;
+            await setProjectCover(coverUrl);
+          }
+        } catch (e) { /* 忽略 */ }
+      }
     } catch (e) {
       setUploadingFiles(prev => prev.map(uf => uf.id === newItem.id ? { ...uf, status: 'error', message: String(e) } : uf));
     }
@@ -887,10 +952,7 @@ export function Video2Page({ projectId }: Video2PageProps) {
         } ${isDragOverThis && !isDraggingThis ? 'ring-2 ring-violet-400/60 border-violet-400/50 -translate-y-0.5' : ''}`}
       >
         {/* 图片/视频区：所有按钮均放在此 relative 容器内 */}
-        <div
-          className="relative aspect-video bg-black/40 overflow-hidden"
-          style={{ minHeight: 200 }}
-        >
+        <div className="relative aspect-video bg-black/40 overflow-hidden">
           {isImage ? (
             <img
               src={item.url}
@@ -906,9 +968,11 @@ export function Video2Page({ projectId }: Video2PageProps) {
               muted
               playsInline
               loop
-              controls
-              className="w-full h-full object-contain bg-black"
+              controls={false}
+              className="absolute inset-0 w-full h-full object-cover"
               onEnded={() => setPlayingItemId(null)}
+              onPause={() => setPlayingItemId(prev => prev === item.id ? null : prev)}
+              onPlay={() => setPlayingItemId(item.id)}
             />
           ) : (
             <>
@@ -918,14 +982,14 @@ export function Video2Page({ projectId }: Video2PageProps) {
                 className="w-full h-full object-cover"
                 onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }}
               />
-              {/* 中央播放按钮 */}
+              {/* 中央播放按钮：微信端封面态统一显示此按钮 */}
               <button
                 onClick={(e) => {
                   e.stopPropagation();
                   setPlayingItemId(item.id);
                   userPausedIdsRef.current.delete(item.id);
                 }}
-                className="absolute inset-0 flex items-center justify-center pointer-events-none"
+                className="absolute inset-0 flex items-center justify-center z-30"
               >
                 <div className="w-14 h-14 rounded-full border-2 border-white/70 bg-black/40 backdrop-blur flex items-center justify-center hover:from-violet-500 hover:to-fuchsia-500 hover:bg-gradient-to-br transition">
                   <Play className="w-6 h-6 text-white fill-white ml-0.5" />
@@ -962,27 +1026,55 @@ export function Video2Page({ projectId }: Video2PageProps) {
 
           {/* 左下角：已拍摄/未拍摄状态按钮 */}
           {currentTab !== 'trash' && (
-            <button
-              onClick={(e) => { e.stopPropagation(); toggleStatus(item); }}
-              className="absolute bottom-3 left-3 z-20 inline-flex items-center gap-1.5 pl-1.5 pr-3 py-1.5 rounded-full text-xs font-medium border transition"
-              style={{
-                backgroundColor: item.status === 'done' ? 'rgba(34,197,94,0.15)' : 'rgba(0,0,0,0.45)',
-                borderColor: item.status === 'done' ? 'rgba(34,197,94,0.6)' : 'rgba(255,255,255,0.25)',
-                color: item.status === 'done' ? '#bbf7d0' : '#fff'
-              }}
-              title={item.status === 'done' ? '点击回到未拍摄' : '点击标记为已拍摄'}
-            >
-              <span
-                className="w-4 h-4 rounded-full border-[1.5px] flex items-center justify-center transition"
-                style={{
-                  borderColor: item.status === 'done' ? '#4ade80' : 'rgba(255,255,255,0.6)',
-                  backgroundColor: item.status === 'done' ? '#22c55e' : 'transparent'
-                }}
-              >
-                {item.status === 'done' && <Check className="w-3 h-3 text-white" />}
-              </span>
-              <span>{item.status === 'done' ? '已拍摄' : '未拍摄'}</span>
-            </button>
+            <div className="absolute bottom-3 left-3 z-20">
+              {item.status === 'pending' ? (
+                <button
+                  onClick={(e) => { e.stopPropagation(); toggleStatus(item); }}
+                  className="inline-flex items-center gap-1.5 pl-1.5 pr-3 py-1.5 rounded-full text-xs font-medium border transition"
+                  style={{
+                    backgroundColor: 'rgba(0,0,0,0.45)',
+                    borderColor: 'rgba(255,255,255,0.25)',
+                    color: '#fff'
+                  }}
+                  title="点击标记为已拍摄"
+                >
+                  <span className="w-4 h-4 rounded-full border-[1.5px] border-white/60 flex items-center justify-center" />
+                  <span>未拍摄</span>
+                </button>
+              ) : (
+                <div className="inline-flex items-center gap-1.5 pl-1.5 pr-2 py-1.5 rounded-full text-xs font-medium border"
+                  style={{
+                    backgroundColor: 'rgba(34,197,94,0.15)',
+                    borderColor: 'rgba(34,197,94,0.6)',
+                    color: '#bbf7d0'
+                  }}
+                >
+                  <button
+                    onClick={(e) => { e.stopPropagation(); toggleStatus(item, true); }}
+                    className="flex items-center gap-1.5"
+                    title="点击回到未拍摄"
+                  >
+                    <span className="w-4 h-4 rounded-full border-[1.5px] border-green-400 flex items-center justify-center" style={{ backgroundColor: '#22c55e' }}>
+                      <Check className="w-3 h-3 text-white" />
+                    </span>
+                    <span>已拍摄</span>
+                  </button>
+                  {item.shotNo && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShotNoInputValue(item.shotNo || '');
+                        setShowShotNoDialog(item);
+                      }}
+                      className="text-underline underline cursor-pointer ml-1 opacity-90 hover:opacity-100"
+                      title="点击修改镜头号"
+                    >
+                      · 镜头 {item.shotNo}
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
           )}
 
           {/* 右下角：桌面端六个点拖拽手柄 */}
@@ -1138,6 +1230,16 @@ export function Video2Page({ projectId }: Video2PageProps) {
           >
             <Share2 className="w-4 h-4 text-white/90" />
           </button>
+          {/* 手机端：场次管理图标 */}
+          {isTouchDevice.current && (
+            <button
+              onClick={() => setShowSceneManager(true)}
+              className="w-9 h-9 rounded-full border border-white/20 bg-white/5 hover:bg-white/10 flex items-center justify-center transition"
+              title="场次管理"
+            >
+              <Settings className="w-4 h-4" />
+            </button>
+          )}
           <button
             onClick={() => { if (uploadAvailable) setShowUploadDialog(true); }}
             disabled={!uploadAvailable}
@@ -1154,72 +1256,37 @@ export function Video2Page({ projectId }: Video2PageProps) {
           </button>
         </div>
 
-        {/* 场次 Tab 栏：桌面端六个点手柄在选中 tab 内部；手机端箭头排序 */}
+        {/* 场次 Tab 栏：桌面端六个点手柄在选中 tab 内部 */}
         <div className="max-w-7xl mx-auto px-4 sm:px-6 pb-3 overflow-x-auto">
           <div className="flex items-center gap-2 min-w-max">
-            {sortedScenes.map((scene, sceneIdx) => {
+            {sortedScenes.map((scene) => {
               const isActive = currentSceneId === scene.id;
               const isDragOverScene = dragOverSceneId === scene.id && dragSceneId !== scene.id;
               const isDraggingScene = dragSceneId === scene.id;
               const isMobile = isTouchDevice.current;
-              const isSceneFirst = sceneIdx <= 0;
-              const isSceneLast = sceneIdx >= sortedScenes.length - 1;
               return (
-                <div
+                <button
                   key={scene.id}
+                  onClick={() => { setCurrentSceneId(scene.id); setSelectedIds(new Set()); }}
+                  draggable={isActive && !isMobile}
                   onDragOver={(e) => handleSceneDragOver(e, scene.id)}
                   onDragLeave={() => setDragOverSceneId(null)}
                   onDrop={(e) => { e.preventDefault(); handleSceneDrop(scene.id); }}
+                  onDragStart={(e) => { if (isActive && !isMobile) { handleSceneDragStart(scene.id); try { e.dataTransfer.effectAllowed = 'move'; } catch (_) {} } }}
+                  onDragEnd={() => { setDragSceneId(null); setDragOverSceneId(null); }}
                   onContextMenu={(e) => { e.preventDefault(); setShowRenameSceneId(scene.id); setRenameSceneName(scene.name); }}
-                  className={`relative ${isDraggingScene ? 'opacity-50' : ''}`}
+                  className={`inline-flex items-center gap-1.5 pl-2 pr-3 sm:pr-4 py-1.5 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap border transition ${isDraggingScene ? 'opacity-50' : ''} ${
+                    isActive
+                      ? 'bg-gradient-to-br from-violet-500 to-fuchsia-500 border-transparent text-white shadow-lg shadow-violet-500/25'
+                      : 'border-white/15 bg-white/5 text-slate-300 hover:bg-white/10'
+                  } ${isDragOverScene ? 'ring-2 ring-violet-400/70' : ''}`}
+                  title={isActive ? '点击切换 · 右键重命名' : '点击切换场次 · 右键重命名'}
                 >
-                  {/* 手机端：选中时在 tab 左右显示 ← → 箭头 */}
-                  {isActive && isMobile && (
-                    <button
-                      onClick={() => moveScene(scene.id, -1)}
-                      disabled={isSceneFirst}
-                      className={`absolute -left-0.5 top-1/2 -translate-y-1/2 z-10 w-5 h-5 rounded-full border flex items-center justify-center transition -ml-3 ${
-                        isSceneFirst
-                          ? 'border-white/10 text-slate-600 cursor-not-allowed'
-                          : 'border-white/20 bg-slate-800 text-white/60 hover:bg-violet-500/40'
-                      }`}
-                      title="场次左移"
-                    >
-                      <ChevronLeft className="w-3 h-3" />
-                    </button>
+                  {isActive && !isMobile && (
+                    <GripVertical className="w-3.5 h-3.5 text-white/90 shrink-0 cursor-grab active:cursor-grabbing" />
                   )}
-                  <button
-                    onClick={() => { setCurrentSceneId(scene.id); setSelectedIds(new Set()); }}
-                    draggable={isActive && !isMobile}
-                    onDragStart={(e) => { if (isActive && !isMobile) { handleSceneDragStart(scene.id); try { e.dataTransfer.effectAllowed = 'move'; } catch (_) {} } }}
-                    onDragEnd={() => { setDragSceneId(null); setDragOverSceneId(null); }}
-                    className={`inline-flex items-center gap-1.5 pl-2 pr-3 sm:pr-4 py-1.5 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap border transition ${
-                      isActive
-                        ? 'bg-gradient-to-br from-violet-500 to-fuchsia-500 border-transparent text-white shadow-lg shadow-violet-500/25'
-                        : 'border-white/15 bg-white/5 text-slate-300 hover:bg-white/10'
-                    } ${isDragOverScene ? 'ring-2 ring-violet-400/70' : ''}`}
-                    title={isActive ? '点击切换 · 右键重命名/删除' : '点击切换场次 · 右键重命名/删除'}
-                  >
-                    {isActive && !isMobile && (
-                      <GripVertical className="w-3.5 h-3.5 text-white/90 shrink-0 cursor-grab active:cursor-grabbing" />
-                    )}
-                    <span>{scene.name}</span>
-                  </button>
-                  {isActive && isMobile && (
-                    <button
-                      onClick={() => moveScene(scene.id, 1)}
-                      disabled={isSceneLast}
-                      className={`absolute -right-0.5 top-1/2 -translate-y-1/2 z-10 w-5 h-5 rounded-full border flex items-center justify-center transition -mr-3 ${
-                        isSceneLast
-                          ? 'border-white/10 text-slate-600 cursor-not-allowed'
-                          : 'border-white/20 bg-slate-800 text-white/60 hover:bg-violet-500/40'
-                      }`}
-                      title="场次右移"
-                    >
-                      <ChevronRight className="w-3 h-3" />
-                    </button>
-                  )}
-                </div>
+                  <span>{scene.name}</span>
+                </button>
               );
             })}
 
@@ -1460,6 +1527,42 @@ export function Video2Page({ projectId }: Video2PageProps) {
         </div>
       )}
 
+      {/* 镜头号输入弹窗 */}
+      {showShotNoDialog !== null && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => { setShowShotNoDialog(null); setShotNoInputValue(''); }}>
+          <div className="w-full max-w-sm rounded-3xl border border-white/10 bg-slate-900/95 backdrop-blur-xl p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-base font-semibold">输入镜头号</h2>
+              <button onClick={() => { setShowShotNoDialog(null); setShotNoInputValue(''); }} className="w-8 h-8 rounded-full hover:bg-white/10 flex items-center justify-center">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <input
+              type="text"
+              value={shotNoInputValue}
+              onChange={(e) => setShotNoInputValue(e.target.value)}
+              placeholder="镜头号（可留空）"
+              className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:border-violet-400/50 outline-none text-sm transition mb-5"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') confirmShotNo();
+                if (e.key === 'Escape') { setShowShotNoDialog(null); setShotNoInputValue(''); }
+              }}
+              autoFocus
+            />
+            <div className="flex items-center justify-end gap-2">
+              <button
+                onClick={() => { setShowShotNoDialog(null); setShotNoInputValue(''); }}
+                className="px-3 py-2 rounded-xl text-sm text-slate-400 hover:text-white hover:bg-white/5 transition"
+              >取消</button>
+              <button
+                onClick={confirmShotNo}
+                className="px-4 py-2 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white text-sm font-medium transition"
+              >确认标记为已拍摄</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 批量上传弹窗 */}
       {showUploadDialog && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => {
@@ -1562,6 +1665,69 @@ export function Video2Page({ projectId }: Video2PageProps) {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* 场次管理面板（手机端） */}
+      {showSceneManager && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowSceneManager(false)}>
+          <div className="w-full max-w-md rounded-t-3xl border-t border-white/10 bg-slate-900/95 backdrop-blur-xl p-4 pb-8 shadow-2xl max-h-[65vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-base font-semibold">场次管理</h2>
+              <button onClick={() => setShowSceneManager(false)} className="w-8 h-8 rounded-full hover:bg-white/10 flex items-center justify-center">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            {/* 新建按钮 */}
+            <button
+              onClick={() => { setShowSceneManager(false); setShowNewSceneModal(true); }}
+              className="w-full mb-3 py-2.5 rounded-2xl border border-dashed border-violet-400/30 bg-violet-500/10 hover:bg-violet-500/20 text-sm font-medium text-violet-200 flex items-center justify-center gap-2 transition"
+            >
+              <Plus className="w-4 h-4" /> 新建场次
+            </button>
+            {/* 场次列表 */}
+            <div className="space-y-1.5">
+              {sortedScenes.map((scene, sceneIdx) => (
+                <div key={scene.id} className={`flex items-center gap-2 px-3 py-2.5 rounded-2xl border transition ${currentSceneId === scene.id ? 'border-violet-400/40 bg-violet-500/10' : 'border-white/10 hover:bg-white/5'}`}>
+                  {/* 上移 */}
+                  <button
+                    onClick={() => moveScene(scene.id, -1)}
+                    disabled={sceneIdx <= 0}
+                    className={`w-8 h-8 rounded-full border flex items-center justify-center shrink-0 transition ${sceneIdx <= 0 ? 'border-white/10 text-slate-600 cursor-not-allowed' : 'border-white/20 text-white/60 hover:bg-violet-500/30 hover:border-violet-400/50'}`}
+                  >
+                    <ChevronUp className="w-4 h-4" />
+                  </button>
+                  {/* 下移 */}
+                  <button
+                    onClick={() => moveScene(scene.id, 1)}
+                    disabled={sceneIdx >= sortedScenes.length - 1}
+                    className={`w-8 h-8 rounded-full border flex items-center justify-center shrink-0 transition ${sceneIdx >= sortedScenes.length - 1 ? 'border-white/10 text-slate-600 cursor-not-allowed' : 'border-white/20 text-white/60 hover:bg-violet-500/30 hover:border-violet-400/50'}`}
+                  >
+                    <ChevronDown className="w-4 h-4" />
+                  </button>
+                  {/* 名称 */}
+                  <button
+                    onClick={() => { setShowSceneManager(false); setShowRenameSceneId(scene.id); setRenameSceneName(scene.name); }}
+                    className="flex-1 text-left text-sm text-white/80 hover:text-white truncate transition"
+                    title="点击重命名"
+                  >
+                    {currentSceneId === scene.id && <span className="inline-block w-1.5 h-1.5 rounded-full bg-green-400 mr-2 align-middle" />}
+                    {scene.name}
+                  </button>
+                  {/* 删除 */}
+                  <button
+                    onClick={() => { if (sortedScenes.length > 1 && confirm(`确认删除场次「${scene.name}」？`)) deleteScene(scene.id); }}
+                    className="w-8 h-8 rounded-full border border-white/15 hover:border-red-400/50 hover:bg-red-500/20 flex items-center justify-center text-slate-400 hover:text-red-300 shrink-0 transition"
+                    title="删除场次"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+            {/* 未分类提示 */}
+            <p className="text-xs text-slate-500 mt-3 text-center">「未分类」固定存在，不可删除或排序</p>
           </div>
         </div>
       )}
