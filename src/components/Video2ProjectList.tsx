@@ -330,6 +330,36 @@ export function Video2ProjectList() {
     window.location.href = `/video2/project/${id}`;
   };
 
+  // 更新项目名称
+  const updateProjectName = async (projectId: number, name: string) => {
+    const n = name.trim();
+    if (!n) return;
+    try {
+      await fetch(`/api/video2/projects/${projectId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: n })
+      });
+      setProjects(prev => prev.map(p => p.id === projectId ? { ...p, name: n } : p));
+    } catch (e) {
+      console.error('更新项目名称失败:', e);
+    }
+  };
+
+  // 更新项目描述
+  const updateProjectDescription = async (projectId: number, description: string) => {
+    try {
+      await fetch(`/api/video2/projects/${projectId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ description })
+      });
+      setProjects(prev => prev.map(p => p.id === projectId ? { ...p, description } : p));
+    } catch (e) {
+      console.error('更新项目描述失败:', e);
+    }
+  };
+
   // 轮播：封面 + reference / 普通素材 合并为一个展示列表
   const buildMediaList = (project: Project): ReferenceItem[] => {
     const refs = referencesCache[project.id] || [];
@@ -523,15 +553,38 @@ export function Video2ProjectList() {
                 <div className="relative p-5">
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1 min-w-0">
-                      <h3
-                        className="text-lg font-semibold truncate cursor-pointer hover:text-violet-300 transition"
-                        onClick={() => goToProject(project.id)}
-                      >
-                        {project.name}
-                      </h3>
-                      {project.description && (
-                        <p className="text-sm text-slate-400 mt-1 line-clamp-2">{project.description}</p>
-                      )}
+                      <input
+                        type="text"
+                        defaultValue={project.name}
+                        onClick={(e) => e.stopPropagation()}
+                        onBlur={(e) => {
+                          const v = e.currentTarget.value.trim();
+                          if (v && v !== project.name) updateProjectName(project.id, v);
+                          else if (!v) e.currentTarget.value = project.name;
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur();
+                          if (e.key === 'Escape' && project.name) (e.currentTarget as HTMLInputElement).value = project.name;
+                        }}
+                        className="w-full text-lg font-semibold bg-transparent border-b border-transparent hover:border-white/20 focus:border-violet-400/60 outline-none py-0.5 transition cursor-text truncate"
+                        title="点击编辑项目名称"
+                      />
+                      <input
+                        type="text"
+                        defaultValue={project.description || ''}
+                        placeholder="点击添加描述..."
+                        onClick={(e) => e.stopPropagation()}
+                        onBlur={(e) => {
+                          const v = e.currentTarget.value.trim();
+                          if (v !== project.description) updateProjectDescription(project.id, v);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur();
+                          if (e.key === 'Escape' && project.description) (e.currentTarget as HTMLInputElement).value = project.description;
+                        }}
+                        className="w-full text-sm text-slate-400 bg-transparent border-b border-transparent hover:border-white/20 focus:border-violet-400/60 outline-none py-0.5 mt-1 line-clamp-2 transition cursor-text resize-none"
+                        title="点击编辑项目描述"
+                      />
                     </div>
                   </div>
 

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Upload, Play, CheckCircle2, Trash2, X, FileVideo, Maximize2, Share2, Plus, ArrowLeft, RotateCcw, Image as ImageIcon, Link2, Check, GripVertical } from 'lucide-react';
+import { Upload, Play, CheckCircle2, Trash2, X, FileVideo, Maximize2, Share2, Plus, ArrowLeft, RotateCcw, Image as ImageIcon, Link2, Check, GripVertical, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 import { setupShareMetadata, copyToClipboard, isWeChat as checkIsWeChat } from '../lib/shareUtils';
 import { uploadVideo2Image, uploadVideo2Video, uploadVideo2FromUrl, detectFileType } from '../lib/ossUtils';
 import { ShareHint } from './WeChatShareHint';
@@ -117,14 +117,14 @@ export function Video2Page({ projectId }: Video2PageProps) {
   // 用户手动暂停过的 item，自动播放逻辑会尊重它
   const userPausedIdsRef = useRef<Set<number>>(new Set());
 
-  // 移动端自定义拖拽（touch）
-  const touchDragRef = useRef<{
-    itemId: number | null;
-    startX: number;
-    startY: number;
-    moved: boolean;
-    targetId: number | null;
-  }>({ itemId: null, startX: 0, startY: 0, moved: false, targetId: null });
+  // 滚动位置记录（key = sceneId-tab）
+  const scrollPositionsRef = useRef<Map<string, number>>(new Map());
+
+  // 平板/桌面检测（用于区分桌面端拖拽 vs 手机端箭头排序）
+  const isTouchDevice = useRef(
+    typeof window !== 'undefined' &&
+    ('ontouchstart' in window || (navigator.maxTouchPoints && navigator.maxTouchPoints > 0))
+  );
 
   // ============ 数据加载 ============
   const loadProject = useCallback(async () => {
@@ -197,6 +197,14 @@ export function Video2Page({ projectId }: Video2PageProps) {
         const list: MediaItem[] = (data.data || []).slice();
         list.sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
         setItems(list);
+        // 渲染完成后恢复滚动位置
+        const key = `${currentSceneId === null ? 'null' : currentSceneId}-${currentTab}`;
+        const saved = scrollPositionsRef.current.get(key);
+        if (saved !== undefined) {
+          window.requestAnimationFrame(() => {
+            window.scrollTo({ top: saved, behavior: 'instant' });
+          });
+        }
       }
     } catch (e) {
       console.error('加载列表失败:', e);
@@ -323,6 +331,25 @@ export function Video2Page({ projectId }: Video2PageProps) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items, currentTab]);
+
+  // ============ 滚动位置记录 ============
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    let rafId = 0;
+    const onScroll = () => {
+      if (rafId) return;
+      rafId = window.requestAnimationFrame(() => {
+        rafId = 0;
+        const key = `${currentSceneId === null ? 'null' : currentSceneId}-${currentTab}`;
+        scrollPositionsRef.current.set(key, window.pageYOffset);
+      });
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      if (rafId) window.cancelAnimationFrame(rafId);
+    };
+  }, [currentSceneId, currentTab]);
 
   // ============ 标题编辑 ============
   const updateTitle = async (id: number, title: string) => {
@@ -587,6 +614,44 @@ export function Video2Page({ projectId }: Video2PageProps) {
     }
     setDragItemId(null);
     setDragOverItemId(null);
+    // 桌面端拖拽完成后也滚动到目标位置
+    window.requestAnimationFrame(() => scrollItemIntoView(targetId));
+  };
+
+  // 手机端上下箭头排序（复用同一排序逻辑）
+  const moveItem = async (itemId: number, dir: -1 | 1) => {
+    const sorted = [...items].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+    const idx = sorted.findIndex(i => i.id === itemId);
+    if (idx < 0) return;
+    const targetIdx = idx + dir;
+    if (targetIdx < 0 || targetIdx >= sorted.length) return;
+
+    const next = [...sorted];
+    [next[idx], next[targetIdx]] = [next[targetIdx], next[idx]];
+    const orders = next.map((i, iidx) => ({ id: i.id, sortOrder: iidx }));
+    setItems(next.map((i, iidx) => ({ ...i, sortOrder: iidx })));
+
+    try {
+      await fetch('/api/video2/videos/batch-update', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'reorder', orders })
+      });
+    } catch (e) {
+      console.error('更新排序失败:', e);
+    }
+    // 排序后滚动到操作后的卡片位置
+    window.requestAnimationFrame(() => scrollItemIntoView(itemId));
+  };
+
+  // 将指定卡片滚动到可视区（垂直居中）
+  const scrollItemIntoView = (itemId: number) => {
+    window.requestAnimationFrame(() => {
+      const el = document.querySelector(`[data-item-id="${itemId}"]`);
+      if (el) {
+        (el as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+      }
+    });
   };
 
   // ============ 拖拽排序（场次 tab） ============
@@ -623,6 +688,28 @@ export function Video2Page({ projectId }: Video2PageProps) {
     }
     setDragSceneId(null);
     setDragOverSceneId(null);
+  };
+
+  // 手机端场次左右箭头排序
+  const moveScene = async (sceneId: number, dir: -1 | 1) => {
+    const sorted = [...scenes].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+    const idx = sorted.findIndex(s => s.id === sceneId);
+    if (idx < 0) return;
+    const targetIdx = idx + dir;
+    if (targetIdx < 0 || targetIdx >= sorted.length) return;
+    const next = [...sorted];
+    [next[idx], next[targetIdx]] = [next[targetIdx], next[idx]];
+    const orders = next.map((s, iidx) => ({ id: s.id, sortOrder: iidx }));
+    setScenes(next.map((s, iidx) => ({ ...s, sortOrder: iidx })));
+    try {
+      await fetch('/api/video2/scenes/sort', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orders })
+      });
+    } catch (e) {
+      console.error('更新场次排序失败:', e);
+    }
   };
 
   // ============ 上传 ============
@@ -775,24 +862,17 @@ export function Video2Page({ projectId }: Video2PageProps) {
     const isDraggingThis = dragItemId === item.id;
     const isDragOverThis = dragOverItemId === item.id;
     const isPlaying = playingItemId === item.id;
+    const isMobile = isTouchDevice.current;
+    // 计算当前索引（基于已排序数组）
+    const sortedItems = [...items].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+    const itemIdx = sortedItems.findIndex(i => i.id === item.id);
+    const isFirst = itemIdx <= 0;
+    const isLast = itemIdx >= sortedItems.length - 1;
 
-    // 桌面端 HTML5 拖拽：绑定到拖拽手柄
+    // 桌面端 HTML5 拖拽
     const onHandleDragStart = (e: React.DragEvent) => {
       handleItemDragStart(item.id);
       try { e.dataTransfer.effectAllowed = 'move'; } catch (_) {}
-    };
-
-    // 移动端 touch 拖拽（手动实现）
-    const onHandleTouchStart = (e: React.TouchEvent) => {
-      const t = e.touches[0];
-      touchDragRef.current = {
-        itemId: item.id,
-        startX: t.clientX,
-        startY: t.clientY,
-        moved: false,
-        targetId: null
-      };
-      setDragItemId(item.id);
     };
 
     return (
@@ -806,7 +886,7 @@ export function Video2Page({ projectId }: Video2PageProps) {
           isDraggingThis ? 'opacity-40 border-violet-400/60 ring-2 ring-violet-400/40' : 'border-white/10 hover:border-violet-400/30'
         } ${isDragOverThis && !isDraggingThis ? 'ring-2 ring-violet-400/60 border-violet-400/50 -translate-y-0.5' : ''}`}
       >
-        {/* 媒体区：图片点击弹窗；视频点击中央播放按钮直接在卡片内播放 */}
+        {/* 图片/视频区：所有按钮均放在此 relative 容器内 */}
         <div
           className="relative aspect-video bg-black/40 overflow-hidden"
           style={{ minHeight: 200 }}
@@ -838,38 +918,49 @@ export function Video2Page({ projectId }: Video2PageProps) {
                 className="w-full h-full object-cover"
                 onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }}
               />
-              {/* 中央播放按钮（可点击） */}
+              {/* 中央播放按钮 */}
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  // 互斥：仅一个卡片播放
                   setPlayingItemId(item.id);
                   userPausedIdsRef.current.delete(item.id);
                 }}
-                className="absolute inset-0 flex items-center justify-center m-auto w-16 h-16 rounded-full border-2 border-violet-400/70 bg-black/40 backdrop-blur hover:from-violet-500 hover:to-fuchsia-500 hover:bg-gradient-to-br text-white transition-all"
-                style={{ top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }}
-                title="在卡片内播放"
+                className="absolute inset-0 flex items-center justify-center pointer-events-none"
               >
-                <Play className="w-7 h-7 text-white fill-white ml-0.5" />
+                <div className="w-14 h-14 rounded-full border-2 border-white/70 bg-black/40 backdrop-blur flex items-center justify-center hover:from-violet-500 hover:to-fuchsia-500 hover:bg-gradient-to-br transition">
+                  <Play className="w-6 h-6 text-white fill-white ml-0.5" />
+                </div>
               </button>
             </>
           )}
+
+          {/* 左上角：批量选择按钮 */}
+          <button
+            onClick={(e) => { e.stopPropagation(); toggleSelect(item.id); }}
+            className={`absolute top-3 left-3 z-20 w-8 h-8 rounded-full border flex items-center justify-center transition ${
+              isSelected
+                ? 'border-transparent bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white'
+                : 'border-white/25 bg-black/40 backdrop-blur hover:bg-violet-500/30 hover:border-violet-400/60 text-white/70'
+            }`}
+            title="选择"
+          >
+            {isSelected ? <Check className="w-4 h-4" /> : <span className="w-3 h-3 rounded-full border border-white/40" />}
+          </button>
 
           {/* 右上角：全屏查看按钮 */}
           <button
             onClick={(e) => {
               e.stopPropagation();
-              // 进入全屏弹窗时，停止卡片内播放
               setPlayingItemId(null);
               setFullscreenItem(item);
             }}
-            className="absolute top-3 right-3 z-20 w-9 h-9 rounded-full border border-violet-400/40 bg-white/5 hover:bg-gradient-to-br hover:from-violet-500 hover:to-fuchsia-500 hover:border-transparent flex items-center justify-center transition"
+            className="absolute top-3 right-3 z-20 w-8 h-8 rounded-full border border-white/25 bg-black/40 backdrop-blur hover:bg-gradient-to-br hover:from-violet-500 hover:to-fuchsia-500 hover:border-transparent flex items-center justify-center transition"
             title="全屏查看"
           >
             <Maximize2 className="w-4 h-4 text-white/90" />
           </button>
 
-          {/* 左下角：未拍摄/已拍摄 状态按钮（仅非垃圾桶显示） */}
+          {/* 左下角：已拍摄/未拍摄状态按钮 */}
           {currentTab !== 'trash' && (
             <button
               onClick={(e) => { e.stopPropagation(); toggleStatus(item); }}
@@ -893,6 +984,19 @@ export function Video2Page({ projectId }: Video2PageProps) {
               <span>{item.status === 'done' ? '已拍摄' : '未拍摄'}</span>
             </button>
           )}
+
+          {/* 右下角：桌面端六个点拖拽手柄 */}
+          {currentTab !== 'trash' && !isMobile && (
+            <div
+              draggable
+              onDragStart={onHandleDragStart}
+              onDragEnd={() => { setDragItemId(null); setDragOverItemId(null); }}
+              className="absolute bottom-3 right-3 z-20 w-8 h-8 rounded-full border border-white/15 bg-black/40 backdrop-blur hover:bg-white/10 text-white/50 hover:text-white flex items-center justify-center transition cursor-grab active:cursor-grabbing select-none"
+              title="拖拽排序"
+            >
+              <GripVertical className="w-4 h-4" />
+            </div>
+          )}
         </div>
 
         {/* 下方操作区 */}
@@ -914,38 +1018,42 @@ export function Video2Page({ projectId }: Video2PageProps) {
             />
           </div>
 
-          {/* 底部操作行：左侧——拖拽手柄（无外圈）+ 选择勾选；右侧——镜头编号/删除 */}
+          {/* 底部操作行 */}
           <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              {/* 拖拽手柄（左下角）：无外圈边框，仅图标 + hover 态，桌面端 draggable，移动端 touch*/}
-              {currentTab !== 'trash' && (
-                <div
-                  draggable
-                  onDragStart={onHandleDragStart}
-                  onDragEnd={() => { setDragItemId(null); setDragOverItemId(null); }}
-                  onTouchStart={onHandleTouchStart}
-                  className="w-8 h-8 rounded-full bg-white/[0.02] hover:bg-white/10 text-white/70 hover:text-violet-200 flex items-center justify-center transition cursor-grab active:cursor-grabbing select-none"
-                  title="拖拽排序"
-                >
-                  <GripVertical className="w-4 h-4" />
-                </div>
+            <div className="flex items-center gap-1.5">
+              {/* 手机端排序箭头（↑↓）：桌面端不显示 */}
+              {currentTab !== 'trash' && isMobile && (
+                <>
+                  <button
+                    onClick={() => moveItem(item.id, -1)}
+                    disabled={isFirst}
+                    className={`w-7 h-7 rounded-full border flex items-center justify-center transition ${
+                      isFirst
+                        ? 'border-white/10 text-slate-600 cursor-not-allowed'
+                        : 'border-white/20 bg-white/5 text-white/60 hover:bg-violet-500/30 hover:border-violet-400/50 hover:text-white'
+                    }`}
+                    title="上移"
+                  >
+                    <ChevronUp className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => moveItem(item.id, 1)}
+                    disabled={isLast}
+                    className={`w-7 h-7 rounded-full border flex items-center justify-center transition ${
+                      isLast
+                        ? 'border-white/10 text-slate-600 cursor-not-allowed'
+                        : 'border-white/20 bg-white/5 text-white/60 hover:bg-violet-500/30 hover:border-violet-400/50 hover:text-white'
+                    }`}
+                    title="下移"
+                  >
+                    <ChevronDown className="w-4 h-4" />
+                  </button>
+                </>
               )}
-              {/* 批量选择勾：无外圈边框（仅选中态有彩色背景） */}
-              <button
-                onClick={(e) => { e.stopPropagation(); toggleSelect(item.id); }}
-                className={`w-8 h-8 rounded-full flex items-center justify-center transition text-xs ${
-                  isSelected
-                    ? 'bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white'
-                    : 'bg-white/[0.02] text-white/40 hover:text-white/80 hover:bg-white/10'
-                }`}
-                title="选择"
-              >
-                {isSelected ? <Check className="w-4 h-4" /> : <span className="w-3 h-3 rounded-full border border-white/30" />}
-              </button>
-              <div className="text-xs text-slate-400">
+              <div className="text-xs text-slate-400 ml-1">
                 {currentTab === 'trash'
                   ? `删除于 ${timeAgo(item.deletedAt || item.updatedAt)}`
-                  : `镜头 ${index + 1}`}
+                  : `镜头 ${itemIdx + 1}`}
               </div>
             </div>
 
@@ -993,44 +1101,6 @@ export function Video2Page({ projectId }: Video2PageProps) {
   return (
     <div
       className="min-h-screen bg-gradient-to-br from-slate-900 via-violet-950 to-pink-950 text-white pb-24"
-      onTouchMove={(e) => {
-        // 自定义移动端卡片拖拽：根据手指位置命中卡片
-        const ctx = touchDragRef.current;
-        if (ctx.itemId === null) return;
-        const dx = e.touches[0].clientX - ctx.startX;
-        const dy = e.touches[0].clientY - ctx.startY;
-        if (!ctx.moved && Math.hypot(dx, dy) > 10) ctx.moved = true;
-        if (ctx.moved) {
-          e.preventDefault();
-          const el = document.elementFromPoint(e.touches[0].clientX, e.touches[0].clientY);
-          let cardEl: HTMLElement | null = el as HTMLElement | null;
-          while (cardEl && !cardEl.getAttribute('data-item-id')) {
-            cardEl = cardEl.parentElement;
-          }
-          const targetId = cardEl ? Number(cardEl.getAttribute('data-item-id')) : null;
-          if (!Number.isNaN(targetId) && targetId !== ctx.itemId) {
-            if (ctx.targetId !== targetId) {
-              ctx.targetId = targetId;
-              setDragOverItemId(targetId);
-            }
-          } else {
-            if (ctx.targetId !== null) {
-              ctx.targetId = null;
-              setDragOverItemId(null);
-            }
-          }
-        }
-      }}
-      onTouchEnd={() => {
-        const ctx = touchDragRef.current;
-        if (ctx.itemId !== null && ctx.moved && ctx.targetId !== null && ctx.targetId !== ctx.itemId) {
-          // 调用与桌面端同一 handleItemDrop 逻辑
-          handleItemDrop(ctx.targetId);
-        }
-        touchDragRef.current = { itemId: null, startX: 0, startY: 0, moved: false, targetId: null };
-        setDragItemId(null);
-        setDragOverItemId(null);
-      }}
     >
       {/* 顶部栏 */}
       <div className="sticky top-0 z-30 backdrop-blur-xl bg-slate-900/75 border-b border-white/10">
@@ -1084,13 +1154,16 @@ export function Video2Page({ projectId }: Video2PageProps) {
           </button>
         </div>
 
-        {/* 场次 Tab 栏：六个点手柄位于 tab 按钮内（仅选中态显示），不再是独立按钮 */}
+        {/* 场次 Tab 栏：桌面端六个点手柄在选中 tab 内部；手机端箭头排序 */}
         <div className="max-w-7xl mx-auto px-4 sm:px-6 pb-3 overflow-x-auto">
           <div className="flex items-center gap-2 min-w-max">
-            {sortedScenes.map(scene => {
+            {sortedScenes.map((scene, sceneIdx) => {
               const isActive = currentSceneId === scene.id;
               const isDragOverScene = dragOverSceneId === scene.id && dragSceneId !== scene.id;
               const isDraggingScene = dragSceneId === scene.id;
+              const isMobile = isTouchDevice.current;
+              const isSceneFirst = sceneIdx <= 0;
+              const isSceneLast = sceneIdx >= sortedScenes.length - 1;
               return (
                 <div
                   key={scene.id}
@@ -1100,23 +1173,52 @@ export function Video2Page({ projectId }: Video2PageProps) {
                   onContextMenu={(e) => { e.preventDefault(); setShowRenameSceneId(scene.id); setRenameSceneName(scene.name); }}
                   className={`relative ${isDraggingScene ? 'opacity-50' : ''}`}
                 >
+                  {/* 手机端：选中时在 tab 左右显示 ← → 箭头 */}
+                  {isActive && isMobile && (
+                    <button
+                      onClick={() => moveScene(scene.id, -1)}
+                      disabled={isSceneFirst}
+                      className={`absolute -left-0.5 top-1/2 -translate-y-1/2 z-10 w-5 h-5 rounded-full border flex items-center justify-center transition -ml-3 ${
+                        isSceneFirst
+                          ? 'border-white/10 text-slate-600 cursor-not-allowed'
+                          : 'border-white/20 bg-slate-800 text-white/60 hover:bg-violet-500/40'
+                      }`}
+                      title="场次左移"
+                    >
+                      <ChevronLeft className="w-3 h-3" />
+                    </button>
+                  )}
                   <button
                     onClick={() => { setCurrentSceneId(scene.id); setSelectedIds(new Set()); }}
-                    draggable={isActive}
-                    onDragStart={(e) => { if (isActive) { handleSceneDragStart(scene.id); try { e.dataTransfer.effectAllowed = 'move'; } catch (_) {} } }}
+                    draggable={isActive && !isMobile}
+                    onDragStart={(e) => { if (isActive && !isMobile) { handleSceneDragStart(scene.id); try { e.dataTransfer.effectAllowed = 'move'; } catch (_) {} } }}
                     onDragEnd={() => { setDragSceneId(null); setDragOverSceneId(null); }}
                     className={`inline-flex items-center gap-1.5 pl-2 pr-3 sm:pr-4 py-1.5 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap border transition ${
                       isActive
                         ? 'bg-gradient-to-br from-violet-500 to-fuchsia-500 border-transparent text-white shadow-lg shadow-violet-500/25'
                         : 'border-white/15 bg-white/5 text-slate-300 hover:bg-white/10'
                     } ${isDragOverScene ? 'ring-2 ring-violet-400/70' : ''}`}
-                    title={isActive ? '点击切换 · 按住拖拽排序 · 右键重命名' : '点击切换场次 · 右键重命名/删除'}
+                    title={isActive ? '点击切换 · 右键重命名/删除' : '点击切换场次 · 右键重命名/删除'}
                   >
-                    {isActive && (
+                    {isActive && !isMobile && (
                       <GripVertical className="w-3.5 h-3.5 text-white/90 shrink-0 cursor-grab active:cursor-grabbing" />
                     )}
                     <span>{scene.name}</span>
                   </button>
+                  {isActive && isMobile && (
+                    <button
+                      onClick={() => moveScene(scene.id, 1)}
+                      disabled={isSceneLast}
+                      className={`absolute -right-0.5 top-1/2 -translate-y-1/2 z-10 w-5 h-5 rounded-full border flex items-center justify-center transition -mr-3 ${
+                        isSceneLast
+                          ? 'border-white/10 text-slate-600 cursor-not-allowed'
+                          : 'border-white/20 bg-slate-800 text-white/60 hover:bg-violet-500/40'
+                      }`}
+                      title="场次右移"
+                    >
+                      <ChevronRight className="w-3 h-3" />
+                    </button>
+                  )}
                 </div>
               );
             })}
