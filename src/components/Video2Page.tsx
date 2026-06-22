@@ -82,10 +82,9 @@ export function Video2Page({ projectId }: Video2PageProps) {
   const [currentTab, setCurrentTab] = useState<'pending' | 'done' | 'trash'>('pending');
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
-  const [showNewSceneModal, setShowNewSceneModal] = useState(false);
   const [newSceneName, setNewSceneName] = useState('');
   const [showMoveModal, setShowMoveModal] = useState(false);
-  const [showRenameSceneId, setShowRenameSceneId] = useState<number | null>(null);
+  const [renameSceneId, setRenameSceneId] = useState<number | null>(null);
   const [renameSceneName, setRenameSceneName] = useState('');
   const [showUploadDialog, setShowUploadDialog] = useState(false);
   const [uploadTab, setUploadTab] = useState<'file' | 'url'>('file');
@@ -107,10 +106,12 @@ export function Video2Page({ projectId }: Video2PageProps) {
 
   // 场次管理面板
   const [showSceneManager, setShowSceneManager] = useState(false);
-  // 场次操作菜单（新建/管理）
-  const [showSceneMenu, setShowSceneMenu] = useState(false);
+  const [sceneManagerMode, setSceneManagerMode] = useState<'list' | 'create' | 'edit'>('list');
 
   const containerRef = useRef<HTMLDivElement | null>(null);
+
+  // 视频元素 ref 管理（微信播放需要同步手势调用）
+  const videoRefs = useRef<Map<number, HTMLVideoElement>>(new Map());
 
   // 拖拽相关 - 媒体卡片
   const [dragItemId, setDragItemId] = useState<number | null>(null);
@@ -132,8 +133,15 @@ export function Video2Page({ projectId }: Video2PageProps) {
 
   // 互斥播放：当前正在卡片内播放的 item id
   const [playingItemId, setPlayingItemId] = useState<number | null>(null);
-  // 用户手动暂停过的 item，自动播放逻辑会尊重它
-  const userPausedIdsRef = useRef<Set<number>>(new Set());
+
+  // 当 playingItemId 变化时：暂停非当前的视频（确保打开弹窗时停止视频）
+  useEffect(() => {
+    videoRefs.current.forEach((v, id) => {
+      if (id !== playingItemId) {
+        try { v.pause(); } catch (_) {}
+      }
+    });
+  }, [playingItemId]);
 
   // 滚动位置记录（key = sceneId-tab）
   const scrollPositionsRef = useRef<Map<string, number>>(new Map());
@@ -395,6 +403,7 @@ export function Video2Page({ projectId }: Video2PageProps) {
     const newStatus = item.status === 'pending' ? 'done' : 'pending';
     // 未拍摄 → 已拍摄：先弹出镜头号输入框
     if (newStatus === 'done' && !skipDialog) {
+      setPlayingItemId(null);
       setShotNoInputValue(item.shotNo || '');
       setShowShotNoDialog(item);
       return;
@@ -609,7 +618,7 @@ export function Video2Page({ projectId }: Video2PageProps) {
       const data = await res.json();
       if (data.success) {
         setNewSceneName('');
-        setShowNewSceneModal(false);
+        setSceneManagerMode('list');
         await loadScenes();
         showToast('已创建场次');
       }
@@ -619,17 +628,18 @@ export function Video2Page({ projectId }: Video2PageProps) {
   };
 
   const renameScene = async () => {
-    if (showRenameSceneId === null) return;
+    if (renameSceneId === null) return;
     const name = renameSceneName.trim();
     if (!name) return;
     try {
-      await fetch(`/api/video2/scenes/${showRenameSceneId}`, {
+      await fetch(`/api/video2/scenes/${renameSceneId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name })
       });
-      setShowRenameSceneId(null);
+      setRenameSceneId(null);
       setRenameSceneName('');
+      setSceneManagerMode('list');
       await loadScenes();
     } catch (e) {
       console.error('重命名失败:', e);
@@ -964,7 +974,7 @@ export function Video2Page({ projectId }: Video2PageProps) {
           isDraggingThis ? 'opacity-40 border-violet-400/60 ring-2 ring-violet-400/40' : 'border-white/10 hover:border-violet-400/30'
         } ${isDragOverThis && !isDraggingThis ? 'ring-2 ring-violet-400/60 border-violet-400/50 -translate-y-0.5' : ''}`}
       >
-        {/* 图片/视频区：所有按钮均放在此 relative 容器内 */}
+        {/* 图片/视频区：所有按钮均放在此 relative 容器内。视频始终渲染以支持微信同步播放 */}
         <div className="relative aspect-video bg-black/40 overflow-hidden media-card-video-container">
           {isImage ? (
             <img
@@ -973,51 +983,47 @@ export function Video2Page({ projectId }: Video2PageProps) {
               className="w-full h-full object-cover"
               onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }}
             />
-          ) : isPlaying ? (
-            <video
-              src={item.url}
-              poster={getPosterUrl(item.url)}
-              autoPlay
-              muted
-              playsInline
-              loop
-              controls={false}
-              className="video-no-controls"
-              onEnded={() => setPlayingItemId(null)}
-              onPause={() => setPlayingItemId(prev => prev === item.id ? null : prev)}
-              onPlay={() => setPlayingItemId(item.id)}
-            />
           ) : (
             <>
-              <img
-                src={getPosterUrl(item.url) || item.url}
-                alt={item.title}
-                className="w-full h-full object-cover"
-                onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }}
-              />
-              {/* 中央播放按钮：仅圆圈区域可点击，点击后在卡片内播放 */}
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  userPausedIdsRef.current.delete(item.id);
-                  setPlayingItemId(item.id);
-                  // 立即播放视频（在用户手势中直接调用，兼容微信）
-                  setTimeout(() => {
-                    const mediaContainer = e.currentTarget.closest('.media-card-video-container');
-                    if (mediaContainer) {
-                      const videoEl = mediaContainer.querySelector('video');
-                      if (videoEl) {
-                        videoEl.play().catch(() => {});
-                      }
-                    }
-                  }, 0);
+              {/* 视频元素始终渲染，通过 ref 存储以支持微信同步播放 */}
+              <video
+                ref={(el) => {
+                  if (el) videoRefs.current.set(item.id, el);
                 }}
-                className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-20"
-              >
-                <div className="w-14 h-14 rounded-full border-2 border-white/70 bg-black/40 backdrop-blur flex items-center justify-center hover:from-violet-500 hover:to-fuchsia-500 hover:bg-gradient-to-br transition">
-                  <Play className="w-6 h-6 text-white fill-white ml-0.5" />
-                </div>
-              </button>
+                src={item.url}
+                poster={getPosterUrl(item.url)}
+                muted
+                playsInline
+                loop
+                controls={false}
+                className="w-full h-full object-cover video-no-controls"
+                onEnded={() => setPlayingItemId(null)}
+                onPause={() => setPlayingItemId(prev => prev === item.id ? null : prev)}
+                onPlay={() => setPlayingItemId(item.id)}
+              />
+              {/* 未播放时：显示中央播放按钮 overlay */}
+              {!isPlaying && (
+                <>
+                  <div className="absolute inset-0 bg-black/20 z-10" />
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setPlayingItemId(item.id);
+                      // 同步调用 video.play()，保持在用户手势事件中（微信兼容）
+                      const v = videoRefs.current.get(item.id);
+                      if (v) {
+                        v.currentTime = 0;
+                        v.play().catch(() => {});
+                      }
+                    }}
+                    className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-20"
+                  >
+                    <div className="w-14 h-14 rounded-full border-2 border-white/70 bg-black/40 backdrop-blur flex items-center justify-center hover:from-violet-500 hover:to-fuchsia-500 hover:bg-gradient-to-br transition">
+                      <Play className="w-6 h-6 text-white fill-white ml-0.5" />
+                    </div>
+                  </button>
+                </>
+              )}
             </>
           )}
 
@@ -1085,6 +1091,7 @@ export function Video2Page({ projectId }: Video2PageProps) {
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
+                        setPlayingItemId(null);
                         setShotNoInputValue(item.shotNo || '');
                         setShowShotNoDialog(item);
                       }}
@@ -1252,7 +1259,7 @@ export function Video2Page({ projectId }: Video2PageProps) {
             <Share2 className="w-4 h-4 text-white/90" />
           </button>
           <button
-            onClick={() => { if (uploadAvailable) setShowUploadDialog(true); }}
+            onClick={() => { if (uploadAvailable) { setPlayingItemId(null); setShowUploadDialog(true); } }}
             disabled={!uploadAvailable}
             className={`inline-flex items-center gap-2 px-3 sm:px-4 py-2 rounded-full border text-sm font-medium transition ${
               uploadAvailable
@@ -1284,7 +1291,14 @@ export function Video2Page({ projectId }: Video2PageProps) {
                   onDrop={(e) => { e.preventDefault(); handleSceneDrop(scene.id); }}
                   onDragStart={(e) => { if (isActive && !isMobile) { handleSceneDragStart(scene.id); try { e.dataTransfer.effectAllowed = 'move'; } catch (_) {} } }}
                   onDragEnd={() => { setDragSceneId(null); setDragOverSceneId(null); }}
-                  onContextMenu={(e) => { e.preventDefault(); setShowRenameSceneId(scene.id); setRenameSceneName(scene.name); }}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setPlayingItemId(null);
+                    setRenameSceneId(scene.id);
+                    setRenameSceneName(scene.name);
+                    setSceneManagerMode('edit');
+                    setShowSceneManager(true);
+                  }}
                   className={`inline-flex items-center gap-1.5 pl-2 pr-3 sm:pr-4 py-1.5 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap border transition ${isDraggingScene ? 'opacity-50' : ''} ${
                     isActive
                       ? 'bg-gradient-to-br from-violet-500 to-fuchsia-500 border-transparent text-white shadow-lg shadow-violet-500/25'
@@ -1313,11 +1327,15 @@ export function Video2Page({ projectId }: Video2PageProps) {
               未分类
             </button>
 
-            {/* + 场次操作菜单 */}
+            {/* + 场次管理 */}
             <button
-              onClick={() => setShowSceneMenu(true)}
+              onClick={() => {
+                setPlayingItemId(null);
+                setSceneManagerMode('list');
+                setShowSceneManager(true);
+              }}
               className="w-8 h-8 rounded-full border border-dashed border-white/25 hover:border-violet-400/50 hover:bg-violet-500/10 text-slate-400 hover:text-violet-200 flex items-center justify-center transition shrink-0"
-              title="场次操作"
+              title="场次管理"
             >
               <Plus className="w-4 h-4" />
             </button>
@@ -1354,7 +1372,7 @@ export function Video2Page({ projectId }: Video2PageProps) {
             ) : (
               <>
                 <button
-                  onClick={() => setShowMoveModal(true)}
+                  onClick={() => { setPlayingItemId(null); setShowMoveModal(true); }}
                   className="px-3 py-1.5 rounded-full text-xs border border-violet-400/30 bg-violet-500/10 hover:bg-violet-500/20 text-violet-200 transition"
                 >
                   移动到场次
@@ -1440,76 +1458,6 @@ export function Video2Page({ projectId }: Video2PageProps) {
 
       {/* ============ 弹窗 ============ */}
 
-      {/* 新建场次 */}
-      {showNewSceneModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => setShowNewSceneModal(false)}>
-          <div className="w-full max-w-sm rounded-3xl border border-white/10 bg-slate-900/95 backdrop-blur-xl p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-base font-semibold">新建场次</h2>
-              <button onClick={() => setShowNewSceneModal(false)} className="w-8 h-8 rounded-full hover:bg-white/10 flex items-center justify-center">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <input
-              type="text"
-              value={newSceneName}
-              onChange={(e) => setNewSceneName(e.target.value)}
-              placeholder="例如：场景 1 - 客厅"
-              className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:border-violet-400/50 outline-none text-sm transition"
-              onKeyDown={(e) => e.key === 'Enter' && createScene()}
-              autoFocus
-            />
-            <div className="flex items-center justify-end gap-2 mt-5">
-              <button onClick={() => setShowNewSceneModal(false)} className="px-3 py-2 rounded-xl text-sm text-slate-400 hover:text-white hover:bg-white/5 transition">取消</button>
-              <button
-                onClick={createScene}
-                disabled={!newSceneName.trim()}
-                className="px-4 py-2 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white text-sm font-medium disabled:opacity-40 transition"
-              >创建</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 重命名场次 */}
-      {showRenameSceneId !== null && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => setShowRenameSceneId(null)}>
-          <div className="w-full max-w-sm rounded-3xl border border-white/10 bg-slate-900/95 backdrop-blur-xl p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-base font-semibold">重命名场次</h2>
-              <button onClick={() => setShowRenameSceneId(null)} className="w-8 h-8 rounded-full hover:bg-white/10 flex items-center justify-center">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <input
-              type="text"
-              value={renameSceneName}
-              onChange={(e) => setRenameSceneName(e.target.value)}
-              placeholder="新的场次名称"
-              className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:border-violet-400/50 outline-none text-sm transition"
-              onKeyDown={(e) => e.key === 'Enter' && renameScene()}
-              autoFocus
-            />
-            <div className="flex items-center justify-between mt-5">
-              <button
-                onClick={() => deleteScene(showRenameSceneId)}
-                className="px-3 py-2 rounded-xl text-sm text-red-300 hover:text-red-200 hover:bg-red-500/10 transition"
-              >
-                删除本场次
-              </button>
-              <div className="flex items-center gap-2">
-                <button onClick={() => setShowRenameSceneId(null)} className="px-3 py-2 rounded-xl text-sm text-slate-400 hover:text-white hover:bg-white/5 transition">取消</button>
-                <button
-                  onClick={renameScene}
-                  disabled={!renameSceneName.trim()}
-                  className="px-4 py-2 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white text-sm font-medium disabled:opacity-40 transition"
-                >保存</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* 移动到场次 */}
       {showMoveModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => setShowMoveModal(false)}>
@@ -1539,7 +1487,7 @@ export function Video2Page({ projectId }: Video2PageProps) {
 
       {/* 镜头号输入弹窗 */}
       {showShotNoDialog !== null && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => { setShowShotNoDialog(null); setShotNoInputValue(''); }}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => { setShowShotNoDialog(null); setShotNoInputValue(''); }}>
           <div className="w-full max-w-sm rounded-3xl border border-white/10 bg-slate-900/95 backdrop-blur-xl p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-base font-semibold">输入镜头号</h2>
@@ -1679,85 +1627,133 @@ export function Video2Page({ projectId }: Video2PageProps) {
         </div>
       )}
 
-      {/* 场次管理面板（手机端） */}
+      {/* 场次管理面板（统一上下居中，内联多视图） */}
       {showSceneManager && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowSceneManager(false)}>
-          <div className="w-full max-w-md rounded-t-3xl border-t border-white/10 bg-slate-900/95 backdrop-blur-xl p-4 pb-8 shadow-2xl max-h-[65vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-base font-semibold">场次管理</h2>
-              <button onClick={() => setShowSceneManager(false)} className="w-8 h-8 rounded-full hover:bg-white/10 flex items-center justify-center">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            {/* 新建按钮 */}
-            <button
-              onClick={() => { setShowSceneManager(false); setShowNewSceneModal(true); }}
-              className="w-full mb-3 py-2.5 rounded-2xl border border-dashed border-violet-400/30 bg-violet-500/10 hover:bg-violet-500/20 text-sm font-medium text-violet-200 flex items-center justify-center gap-2 transition"
-            >
-              <Plus className="w-4 h-4" /> 新建场次
-            </button>
-            {/* 场次列表 */}
-            <div className="space-y-1.5">
-              {sortedScenes.map((scene, sceneIdx) => (
-                <div key={scene.id} className={`flex items-center gap-2 px-3 py-2.5 rounded-2xl border transition ${currentSceneId === scene.id ? 'border-violet-400/40 bg-violet-500/10' : 'border-white/10 hover:bg-white/5'}`}>
-                  {/* 上移 */}
-                  <button
-                    onClick={() => moveScene(scene.id, -1)}
-                    disabled={sceneIdx <= 0}
-                    className={`w-8 h-8 rounded-full border flex items-center justify-center shrink-0 transition ${sceneIdx <= 0 ? 'border-white/10 text-slate-600 cursor-not-allowed' : 'border-white/20 text-white/60 hover:bg-violet-500/30 hover:border-violet-400/50'}`}
-                  >
-                    <ChevronUp className="w-4 h-4" />
-                  </button>
-                  {/* 下移 */}
-                  <button
-                    onClick={() => moveScene(scene.id, 1)}
-                    disabled={sceneIdx >= sortedScenes.length - 1}
-                    className={`w-8 h-8 rounded-full border flex items-center justify-center shrink-0 transition ${sceneIdx >= sortedScenes.length - 1 ? 'border-white/10 text-slate-600 cursor-not-allowed' : 'border-white/20 text-white/60 hover:bg-violet-500/30 hover:border-violet-400/50'}`}
-                  >
-                    <ChevronDown className="w-4 h-4" />
-                  </button>
-                  {/* 名称 */}
-                  <button
-                    onClick={() => { setShowSceneManager(false); setShowRenameSceneId(scene.id); setRenameSceneName(scene.name); }}
-                    className="flex-1 text-left text-sm text-white/80 hover:text-white truncate transition"
-                    title="点击重命名"
-                  >
-                    {currentSceneId === scene.id && <span className="inline-block w-1.5 h-1.5 rounded-full bg-green-400 mr-2 align-middle" />}
-                    {scene.name}
-                  </button>
-                  {/* 删除 */}
-                  <button
-                    onClick={() => { if (sortedScenes.length > 1 && confirm(`确认删除场次「${scene.name}」？`)) deleteScene(scene.id); }}
-                    className="w-8 h-8 rounded-full border border-white/15 hover:border-red-400/50 hover:bg-red-500/20 flex items-center justify-center text-slate-400 hover:text-red-300 shrink-0 transition"
-                    title="删除场次"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => { setSceneManagerMode('list'); setShowSceneManager(false); }}>
+          <div className="w-full max-w-md rounded-3xl border border-white/10 bg-slate-900/95 backdrop-blur-xl p-4 shadow-2xl max-h-[75vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            {/* 列表视图 */}
+            {sceneManagerMode === 'list' && (
+              <>
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-base font-semibold">场次管理</h2>
+                  <button onClick={() => { setSceneManagerMode('list'); setShowSceneManager(false); }} className="w-8 h-8 rounded-full hover:bg-white/10 flex items-center justify-center">
+                    <X className="w-4 h-4" />
                   </button>
                 </div>
-              ))}
-            </div>
-            {/* 未分类提示 */}
-            <p className="text-xs text-slate-500 mt-3 text-center">「未分类」固定存在，不可删除或排序</p>
-          </div>
-        </div>
-      )}
+                {/* 新建按钮 */}
+                <button
+                  onClick={() => { setNewSceneName(''); setSceneManagerMode('create'); }}
+                  className="w-full mb-3 py-2.5 rounded-2xl border border-dashed border-violet-400/30 bg-violet-500/10 hover:bg-violet-500/20 text-sm font-medium text-violet-200 flex items-center justify-center gap-2 transition"
+                >
+                  <Plus className="w-4 h-4" /> 新建场次
+                </button>
+                {/* 场次列表 */}
+                <div className="space-y-1.5">
+                  {sortedScenes.map((scene, sceneIdx) => (
+                    <div key={scene.id} className={`flex items-center gap-2 px-3 py-2.5 rounded-2xl border transition ${currentSceneId === scene.id ? 'border-violet-400/40 bg-violet-500/10' : 'border-white/10 hover:bg-white/5'}`}>
+                      <button
+                        onClick={() => moveScene(scene.id, -1)}
+                        disabled={sceneIdx <= 0}
+                        className={`w-8 h-8 rounded-full border flex items-center justify-center shrink-0 transition ${sceneIdx <= 0 ? 'border-white/10 text-slate-600 cursor-not-allowed' : 'border-white/20 text-white/60 hover:bg-violet-500/30 hover:border-violet-400/50'}`}
+                      >
+                        <ChevronUp className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => moveScene(scene.id, 1)}
+                        disabled={sceneIdx >= sortedScenes.length - 1}
+                        className={`w-8 h-8 rounded-full border flex items-center justify-center shrink-0 transition ${sceneIdx >= sortedScenes.length - 1 ? 'border-white/10 text-slate-600 cursor-not-allowed' : 'border-white/20 text-white/60 hover:bg-violet-500/30 hover:border-violet-400/50'}`}
+                      >
+                        <ChevronDown className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => { setRenameSceneId(scene.id); setRenameSceneName(scene.name); setSceneManagerMode('edit'); }}
+                        className="flex-1 text-left text-sm text-white/80 hover:text-white truncate transition"
+                        title="点击重命名"
+                      >
+                        {currentSceneId === scene.id && <span className="inline-block w-1.5 h-1.5 rounded-full bg-green-400 mr-2 align-middle" />}
+                        {scene.name}
+                      </button>
+                      <button
+                        onClick={() => { if (sortedScenes.length > 1 && confirm(`确认删除场次「${scene.name}」？`)) deleteScene(scene.id); }}
+                        className="w-8 h-8 rounded-full border border-white/15 hover:border-red-400/50 hover:bg-red-500/20 flex items-center justify-center text-slate-400 hover:text-red-300 shrink-0 transition"
+                        title="删除场次"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-xs text-slate-500 mt-3 text-center">「未分类」固定存在，不可删除或排序</p>
+              </>
+            )}
 
-      {/* 场次操作菜单 */}
-      {showSceneMenu && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => setShowSceneMenu(false)}>
-          <div className="w-full max-w-sm rounded-3xl border border-white/10 bg-slate-900/95 backdrop-blur-xl p-4 shadow-2xl" onClick={e => e.stopPropagation()}>
-            <button
-              onClick={() => { setShowSceneMenu(false); setShowNewSceneModal(true); }}
-              className="w-full mb-2 py-3 rounded-2xl border border-white/10 hover:bg-white/5 text-sm font-medium text-white flex items-center justify-center gap-2 transition"
-            >
-              <Plus className="w-4 h-4" /> 新建场次
-            </button>
-            <button
-              onClick={() => { setShowSceneMenu(false); setShowSceneManager(true); }}
-              className="w-full py-3 rounded-2xl border border-white/10 hover:bg-white/5 text-sm font-medium text-white flex items-center justify-center gap-2 transition"
-            >
-              <Settings className="w-4 h-4" /> 场次管理
-            </button>
+            {/* 新建视图 */}
+            {sceneManagerMode === 'create' && (
+              <>
+                <div className="flex items-center justify-between mb-4">
+                  <button onClick={() => setSceneManagerMode('list')} className="w-8 h-8 rounded-full hover:bg-white/10 flex items-center justify-center">
+                    <ArrowLeft className="w-4 h-4" />
+                  </button>
+                  <h2 className="text-base font-semibold">新建场次</h2>
+                  <div className="w-8 h-8" />
+                </div>
+                <input
+                  type="text"
+                  value={newSceneName}
+                  onChange={(e) => setNewSceneName(e.target.value)}
+                  placeholder="例如：场景 1 - 客厅"
+                  className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:border-violet-400/50 outline-none text-sm transition"
+                  onKeyDown={(e) => e.key === 'Enter' && createScene()}
+                  autoFocus
+                />
+                <div className="flex items-center justify-end gap-2 mt-5">
+                  <button onClick={() => setSceneManagerMode('list')} className="px-3 py-2 rounded-xl text-sm text-slate-400 hover:text-white hover:bg-white/5 transition">取消</button>
+                  <button
+                    onClick={createScene}
+                    disabled={!newSceneName.trim()}
+                    className="px-4 py-2 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white text-sm font-medium disabled:opacity-40 transition"
+                  >创建</button>
+                </div>
+              </>
+            )}
+
+            {/* 编辑视图 */}
+            {sceneManagerMode === 'edit' && (
+              <>
+                <div className="flex items-center justify-between mb-4">
+                  <button onClick={() => setSceneManagerMode('list')} className="w-8 h-8 rounded-full hover:bg-white/10 flex items-center justify-center">
+                    <ArrowLeft className="w-4 h-4" />
+                  </button>
+                  <h2 className="text-base font-semibold">重命名场次</h2>
+                  <div className="w-8 h-8" />
+                </div>
+                <input
+                  type="text"
+                  value={renameSceneName}
+                  onChange={(e) => setRenameSceneName(e.target.value)}
+                  placeholder="新的场次名称"
+                  className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:border-violet-400/50 outline-none text-sm transition"
+                  onKeyDown={(e) => e.key === 'Enter' && renameScene()}
+                  autoFocus
+                />
+                <div className="flex items-center justify-between mt-5">
+                  <button
+                    onClick={() => { if (renameSceneId !== null && confirm('确认删除本场次？')) deleteScene(renameSceneId); }}
+                    className="px-3 py-2 rounded-xl text-sm text-red-300 hover:text-red-200 hover:bg-red-500/10 transition"
+                  >
+                    删除本场次
+                  </button>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => setSceneManagerMode('list')} className="px-3 py-2 rounded-xl text-sm text-slate-400 hover:text-white hover:bg-white/5 transition">取消</button>
+                    <button
+                      onClick={renameScene}
+                      disabled={!renameSceneName.trim()}
+                      className="px-4 py-2 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white text-sm font-medium disabled:opacity-40 transition"
+                    >保存</button>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
