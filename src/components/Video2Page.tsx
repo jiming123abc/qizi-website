@@ -134,13 +134,21 @@ export function Video2Page({ projectId }: Video2PageProps) {
   // 互斥播放：当前正在卡片内播放的 item id
   const [playingItemId, setPlayingItemId] = useState<number | null>(null);
 
-  // 当 playingItemId 变化时：暂停非当前的视频（确保打开弹窗时停止视频）
+  // 当 playingItemId 变化时：
+  // 1) 暂停非当前的视频（确保打开弹窗/切换时停止）
+  // 2) 对当前播放项调用 .play()，恢复 IntersectionObserver 驱动的手机浏览器滚动自动播放
   useEffect(() => {
     videoRefs.current.forEach((v, id) => {
       if (id !== playingItemId) {
         try { v.pause(); } catch (_) {}
       }
     });
+    if (playingItemId !== null) {
+      const v = videoRefs.current.get(playingItemId);
+      if (v) {
+        v.play().catch(() => {});
+      }
+    }
   }, [playingItemId]);
 
   // 滚动位置记录（key = sceneId-tab）
