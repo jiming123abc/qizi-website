@@ -122,8 +122,12 @@
   .media-card-video-container {
     position: relative;
     overflow: hidden;
+    isolation: isolate;
     transform: translateZ(0);
     backface-visibility: hidden;
+    contain: layout paint size;
+    clip-path: inset(0);
+    z-index: 1;
   }
 
   .media-card-video-container video {
@@ -135,5 +139,10 @@
     object-fit: cover;
     display: block;
     contain: layout paint size;
+    max-width: 100%;
+    max-height: 100%;
+    z-index: 0;
+    transform: translateZ(0);
+    backface-visibility: hidden;
   }
 }

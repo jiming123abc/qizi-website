@@ -105,8 +105,10 @@ export function Video2Page({ projectId }: Video2PageProps) {
   const [showShotNoDialog, setShowShotNoDialog] = useState<MediaItem | null>(null);
   const [shotNoInputValue, setShotNoInputValue] = useState('');
 
-  // 场次管理面板（手机端）
+  // 场次管理面板
   const [showSceneManager, setShowSceneManager] = useState(false);
+  // 场次操作菜单（新建/管理）
+  const [showSceneMenu, setShowSceneMenu] = useState(false);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -137,10 +139,13 @@ export function Video2Page({ projectId }: Video2PageProps) {
   const scrollPositionsRef = useRef<Map<string, number>>(new Map());
 
   // 平板/桌面检测（用于区分桌面端拖拽 vs 手机端箭头排序）
-  const isTouchDevice = useRef(
-    typeof window !== 'undefined' &&
-    ('ontouchstart' in window || (navigator.maxTouchPoints && navigator.maxTouchPoints > 0))
-  );
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
 
   // ============ 数据加载 ============
   const loadProject = useCallback(async () => {
@@ -936,7 +941,6 @@ export function Video2Page({ projectId }: Video2PageProps) {
     const isDraggingThis = dragItemId === item.id;
     const isDragOverThis = dragOverItemId === item.id;
     const isPlaying = playingItemId === item.id;
-    const isMobile = isTouchDevice.current;
     // 计算当前索引（基于已排序数组）
     const sortedItems = [...items].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
     const itemIdx = sortedItems.findIndex(i => i.id === item.id);
@@ -997,15 +1001,16 @@ export function Video2Page({ projectId }: Video2PageProps) {
                   e.stopPropagation();
                   userPausedIdsRef.current.delete(item.id);
                   setPlayingItemId(item.id);
+                  // 立即播放视频（在用户手势中直接调用，兼容微信）
                   setTimeout(() => {
-                    const mediaContainer = e.currentTarget.closest('.aspect-video');
+                    const mediaContainer = e.currentTarget.closest('.media-card-video-container');
                     if (mediaContainer) {
                       const videoEl = mediaContainer.querySelector('video');
                       if (videoEl) {
                         videoEl.play().catch(() => {});
                       }
                     }
-                  }, 50);
+                  }, 0);
                 }}
                 className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-20"
               >
@@ -1048,7 +1053,7 @@ export function Video2Page({ projectId }: Video2PageProps) {
               {item.status === 'pending' ? (
                 <button
                   onClick={(e) => { e.stopPropagation(); toggleStatus(item); }}
-                  className="inline-flex items-center gap-1.5 pl-1.5 pr-3 py-1.5 rounded-full text-xs font-medium border transition"
+                  className="inline-flex items-center pl-2.5 pr-3 py-1.5 rounded-full text-xs font-medium border transition"
                   style={{
                     backgroundColor: 'rgba(0,0,0,0.45)',
                     borderColor: 'rgba(255,255,255,0.25)',
@@ -1056,7 +1061,6 @@ export function Video2Page({ projectId }: Video2PageProps) {
                   }}
                   title="点击标记为已拍摄"
                 >
-                  <span className="w-4 h-4 rounded-full border-[1.5px] border-white/60 flex items-center justify-center" />
                   <span>未拍摄</span>
                 </button>
               ) : (
@@ -1092,19 +1096,6 @@ export function Video2Page({ projectId }: Video2PageProps) {
                   )}
                 </div>
               )}
-            </div>
-          )}
-
-          {/* 右下角：桌面端六个点拖拽手柄 */}
-          {currentTab !== 'trash' && !isMobile && (
-            <div
-              draggable
-              onDragStart={onHandleDragStart}
-              onDragEnd={() => { setDragItemId(null); setDragOverItemId(null); }}
-              className="absolute bottom-3 right-3 z-20 w-8 h-8 rounded-full border border-white/15 bg-black/40 backdrop-blur hover:bg-white/10 text-white/50 hover:text-white flex items-center justify-center transition cursor-grab active:cursor-grabbing select-none"
-              title="拖拽排序"
-            >
-              <GripVertical className="w-4 h-4" />
             </div>
           )}
         </div>
@@ -1159,6 +1150,18 @@ export function Video2Page({ projectId }: Video2PageProps) {
                     <ChevronDown className="w-4 h-4" />
                   </button>
                 </>
+              )}
+              {/* 桌面端拖拽手柄：无外圈，与手机端排序按钮位置一致 */}
+              {currentTab !== 'trash' && !isMobile && (
+                <div
+                  draggable
+                  onDragStart={onHandleDragStart}
+                  onDragEnd={() => { setDragItemId(null); setDragOverItemId(null); }}
+                  className="text-white/40 hover:text-white cursor-grab active:cursor-grabbing select-none"
+                  title="拖拽排序"
+                >
+                  <GripVertical className="w-4 h-4" />
+                </div>
               )}
               <div className="text-xs text-slate-400 ml-1">
                 {currentTab === 'trash'
@@ -1248,16 +1251,6 @@ export function Video2Page({ projectId }: Video2PageProps) {
           >
             <Share2 className="w-4 h-4 text-white/90" />
           </button>
-          {/* 手机端：场次管理图标 */}
-          {isTouchDevice.current && (
-            <button
-              onClick={() => setShowSceneManager(true)}
-              className="w-9 h-9 rounded-full border border-white/20 bg-white/5 hover:bg-white/10 flex items-center justify-center transition"
-              title="场次管理"
-            >
-              <Settings className="w-4 h-4" />
-            </button>
-          )}
           <button
             onClick={() => { if (uploadAvailable) setShowUploadDialog(true); }}
             disabled={!uploadAvailable}
@@ -1281,7 +1274,6 @@ export function Video2Page({ projectId }: Video2PageProps) {
               const isActive = currentSceneId === scene.id;
               const isDragOverScene = dragOverSceneId === scene.id && dragSceneId !== scene.id;
               const isDraggingScene = dragSceneId === scene.id;
-              const isMobile = isTouchDevice.current;
               return (
                 <button
                   key={scene.id}
@@ -1321,11 +1313,11 @@ export function Video2Page({ projectId }: Video2PageProps) {
               未分类
             </button>
 
-            {/* + 新建场次 */}
+            {/* + 场次操作菜单 */}
             <button
-              onClick={() => setShowNewSceneModal(true)}
+              onClick={() => setShowSceneMenu(true)}
               className="w-8 h-8 rounded-full border border-dashed border-white/25 hover:border-violet-400/50 hover:bg-violet-500/10 text-slate-400 hover:text-violet-200 flex items-center justify-center transition shrink-0"
-              title="新建场次"
+              title="场次操作"
             >
               <Plus className="w-4 h-4" />
             </button>
@@ -1750,6 +1742,26 @@ export function Video2Page({ projectId }: Video2PageProps) {
         </div>
       )}
 
+      {/* 场次操作菜单 */}
+      {showSceneMenu && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => setShowSceneMenu(false)}>
+          <div className="w-full max-w-sm rounded-3xl border border-white/10 bg-slate-900/95 backdrop-blur-xl p-4 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <button
+              onClick={() => { setShowSceneMenu(false); setShowNewSceneModal(true); }}
+              className="w-full mb-2 py-3 rounded-2xl border border-white/10 hover:bg-white/5 text-sm font-medium text-white flex items-center justify-center gap-2 transition"
+            >
+              <Plus className="w-4 h-4" /> 新建场次
+            </button>
+            <button
+              onClick={() => { setShowSceneMenu(false); setShowSceneManager(true); }}
+              className="w-full py-3 rounded-2xl border border-white/10 hover:bg-white/5 text-sm font-medium text-white flex items-center justify-center gap-2 transition"
+            >
+              <Settings className="w-4 h-4" /> 场次管理
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* 全屏查看 */}
       {fullscreenItem && (
         <div className="fixed inset-0 z-[80] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setFullscreenItem(null)}>
@@ -1768,6 +1780,7 @@ export function Video2Page({ projectId }: Video2PageProps) {
                 src={fullscreenItem.url}
                 poster={getPosterUrl(fullscreenItem.url)}
                 controls
+                autoPlay
                 playsInline
                 muted={false}
                 className="mx-auto max-w-full max-h-[80vh] rounded-2xl bg-black"
