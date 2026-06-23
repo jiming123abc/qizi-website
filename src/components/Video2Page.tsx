@@ -219,12 +219,15 @@ export function Video2Page({ projectId }: Video2PageProps) {
     try {
       const params = new URLSearchParams();
       params.set('projectId', String(projectId));
-      // currentSceneId === null 表示"未分类"，需要显式传 "null" 让后端过滤 sceneId IS NULL；
-      // currentSceneId !== null 表示具体场次，传数字 ID；未定义则不过滤。
-      if (currentSceneId === null) {
-        params.set('sceneId', 'null');
-      } else if (currentSceneId !== null) {
-        params.set('sceneId', String(currentSceneId));
+      // 垃圾桶 tab 不筛选场次，显示所有删除的素材
+      if (currentTab !== 'trash') {
+        // currentSceneId === null 表示"未分类"，需要显式传 "null" 让后端过滤 sceneId IS NULL；
+        // currentSceneId !== null 表示具体场次，传数字 ID；未定义则不过滤。
+        if (currentSceneId === null) {
+          params.set('sceneId', 'null');
+        } else if (currentSceneId !== null) {
+          params.set('sceneId', String(currentSceneId));
+        }
       }
       if (currentTab === 'trash') params.set('deleted', '1');
       else params.set('status', currentTab);
@@ -252,9 +255,11 @@ export function Video2Page({ projectId }: Video2PageProps) {
     try {
       const params = new URLSearchParams();
       params.set('projectId', String(projectId));
-      // 携带当前场次：pending/done 仅统计此场次下素材，trash 按项目统计
-      if (currentSceneId === null) params.set('sceneId', 'null');
-      else if (currentSceneId !== null) params.set('sceneId', String(currentSceneId));
+      // 携带当前场次：pending/done 仅统计此场次下素材，trash 按项目统计（不传 sceneId）
+      if (currentTab !== 'trash') {
+        if (currentSceneId === null) params.set('sceneId', 'null');
+        else if (currentSceneId !== null) params.set('sceneId', String(currentSceneId));
+      }
       const res = await fetch(`/api/video2/stats?${params.toString()}`);
       const data = await res.json();
       if (data.success) {
@@ -295,83 +300,6 @@ export function Video2Page({ projectId }: Video2PageProps) {
     // 切换 tab 时停止当前播放
     setPlayingItemId(null);
   }, [currentSceneId, currentTab, loadItems, loadStats]);
-
-  // ============ 移动端自动播放：IntersectionObserver 检测可见面积最大的视频卡片 ============
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    // 只在触摸设备/手机生效（避免桌面端干扰用户手动播放）
-    const isTouch =
-      ('ontouchstart' in window) ||
-      (navigator.maxTouchPoints && navigator.maxTouchPoints > 0);
-    if (!isTouch) return;
-
-    // 微信内不支持滚动触发自动播放（即便 muted 也需要用户点击手势
-    // 注：有声音的视频仍然需要用户手势，在全屏弹窗内解除静音
-    if (checkIsWeChat()) return;
-
-    // 只在当前 tab 是 pending/done 时启用（垃圾桶不预览视频）
-    if (currentTab === 'trash') return;
-
-    const visibility = new Map<number, number>(); // itemId -> 可见面积
-
-    // 基于当前 items 列表，每隔一段时间评估一次面积最大的 item
-    let rafId = 0;
-    const evaluate = () => {
-      rafId = 0;
-      if (items.length === 0) return;
-      let bestId: number | null = null;
-      let bestArea = 0;
-      for (const it of items) {
-        const area = visibility.get(it.id) || 0;
-        if (area > bestArea) {
-          bestArea = area;
-          bestId = it.id;
-        }
-      }
-      // 阈值：卡片面积至少有 10000 px²（约 100x100）才认为"正在显示"
-      const minArea = 10000;
-      if (bestArea >= minArea && bestId !== null) {
-        setPlayingItemId((prev) => (prev === bestId ? prev : bestId));
-      } else {
-        setPlayingItemId(null);
-      }
-    };
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          const idAttr = (entry.target as HTMLElement).getAttribute('data-item-id');
-          if (!idAttr) continue;
-          const id = Number(idAttr);
-          if (!Number.isFinite(id)) continue;
-          // 计算可见面积：boundingClientRect 面积 * intersectionRatio
-          const rect = entry.boundingClientRect;
-          const area = rect.width * rect.height * entry.intersectionRatio;
-          visibility.set(id, area);
-        }
-        if (!rafId) rafId = window.requestAnimationFrame(evaluate);
-      },
-      { threshold: [0, 0.1, 0.25, 0.5, 0.75, 1] }
-    );
-
-    // 初始扫描：所有带 data-item-id 的卡片
-    const scan = () => {
-      visibility.clear();
-      const nodes = document.querySelectorAll('[data-item-id]');
-      nodes.forEach((n) => observer.observe(n));
-      if (!rafId) rafId = window.requestAnimationFrame(evaluate);
-    };
-
-    // 延迟一点再扫描，让 DOM 挂载完成
-    const scanTimer = window.setTimeout(scan, 200);
-
-    return () => {
-      window.clearTimeout(scanTimer);
-      observer.disconnect();
-      if (rafId) window.cancelAnimationFrame(rafId);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, currentTab]);
 
   // ============ 滚动位置记录 ============
   useEffect(() => {
@@ -1048,12 +976,29 @@ export function Video2Page({ projectId }: Video2PageProps) {
             {isSelected ? <Check className="w-4 h-4" /> : <span className="w-3 h-3 rounded-full border border-white/40" />}
           </button>
 
-          {/* 右上角：全屏查看按钮 */}
+          {/* 右上角：全屏查看按钮（视频直接全屏，图片打开弹窗） */}
           <button
             onClick={(e) => {
               e.stopPropagation();
-              setPlayingItemId(null);
-              setFullscreenItem(item);
+              if (item.type === 'video') {
+                // 视频：直接对视频元素调用全屏 API
+                setPlayingItemId(item.id);
+                const v = videoRefs.current.get(item.id);
+                if (v) {
+                  v.play().catch(() => {});
+                  // iOS Safari 使用 webkitEnterFullscreen，其他用标准 API
+                  const el = v as HTMLVideoElement & { webkitEnterFullscreen?: () => void };
+                  if (el.webkitEnterFullscreen) {
+                    el.webkitEnterFullscreen();
+                  } else {
+                    v.requestFullscreen().catch(() => {});
+                  }
+                }
+              } else {
+                // 图片：打开弹窗
+                setPlayingItemId(null);
+                setFullscreenItem(item);
+              }
             }}
             className="absolute top-3 right-3 z-20 w-8 h-8 rounded-full border border-white/25 bg-black/40 backdrop-blur hover:bg-gradient-to-br hover:from-violet-500 hover:to-fuchsia-500 hover:border-transparent flex items-center justify-center transition"
             title="全屏查看"
@@ -1078,40 +1023,44 @@ export function Video2Page({ projectId }: Video2PageProps) {
                   <span>未拍摄</span>
                 </button>
               ) : (
-                <div className="inline-flex items-center gap-1.5 pl-1.5 pr-2 py-1.5 rounded-full text-xs font-medium border"
+                <button
+                  onClick={(e) => { e.stopPropagation(); toggleStatus(item, true); }}
+                  className="inline-flex items-center gap-1.5 pl-1.5 pr-2 py-1.5 rounded-full text-xs font-medium border transition"
                   style={{
                     backgroundColor: 'rgba(34,197,94,0.15)',
                     borderColor: 'rgba(34,197,94,0.6)',
                     color: '#bbf7d0'
                   }}
+                  title="点击回到未拍摄"
                 >
-                  <button
-                    onClick={(e) => { e.stopPropagation(); toggleStatus(item, true); }}
-                    className="flex items-center gap-1.5"
-                    title="点击回到未拍摄"
-                  >
-                    <span className="w-4 h-4 rounded-full border-[1.5px] border-green-400 flex items-center justify-center" style={{ backgroundColor: '#22c55e' }}>
-                      <Check className="w-3 h-3 text-white" />
-                    </span>
-                    <span>已拍摄</span>
-                  </button>
-                  {item.shotNo && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setPlayingItemId(null);
-                        setShotNoInputValue(item.shotNo || '');
-                        setShowShotNoDialog(item);
-                      }}
-                      className="text-underline underline cursor-pointer ml-1 opacity-90 hover:opacity-100"
-                      title="点击修改镜头号"
-                    >
-                      · 镜头 {item.shotNo}
-                    </button>
-                  )}
-                </div>
+                  <span className="w-4 h-4 rounded-full border-[1.5px] border-green-400 flex items-center justify-center" style={{ backgroundColor: '#22c55e' }}>
+                    <Check className="w-3 h-3 text-white" />
+                  </span>
+                  <span>已拍摄</span>
+                </button>
               )}
             </div>
+          )}
+
+          {/* 右下角：镜头编号（已拍摄且存在 shotNo 时显示） */}
+          {currentTab !== 'trash' && item.status === 'done' && item.shotNo && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setPlayingItemId(null);
+                setShotNoInputValue(item.shotNo || '');
+                setShowShotNoDialog(item);
+              }}
+              className="absolute bottom-3 right-3 z-20 inline-flex items-center px-2.5 py-1.5 rounded-full text-xs font-medium border transition"
+              style={{
+                backgroundColor: 'rgba(34,197,94,0.15)',
+                borderColor: 'rgba(34,197,94,0.6)',
+                color: '#bbf7d0'
+              }}
+              title="点击修改镜头号"
+            >
+              镜头 {item.shotNo}
+            </button>
           )}
         </div>
 
