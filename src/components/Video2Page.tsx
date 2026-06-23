@@ -105,6 +105,9 @@ export function Video2Page({ projectId }: Video2PageProps) {
 
   // 镜头号输入弹窗
   const [showShotNoDialog, setShowShotNoDialog] = useState<MediaItem | null>(null);
+  // 'markDone': 从未拍摄标记为已拍摄时触发（显示说明文字）
+  // 'edit': 从已拍摄标签页点击编号按钮触发（不显示说明文字）
+  const [shotNoDialogMode, setShotNoDialogMode] = useState<'markDone' | 'edit'>('markDone');
   const [shotNoInputValue, setShotNoInputValue] = useState('');
 
   // 场次管理面板
@@ -1055,6 +1058,7 @@ export function Video2Page({ projectId }: Video2PageProps) {
               onClick={(e) => {
                 e.stopPropagation();
                 setPlayingItemId(null);
+                setShotNoDialogMode('edit');
                 setShotNoInputValue(item.shotNo || '');
                 setShowShotNoDialog(item);
               }}
@@ -1459,7 +1463,9 @@ export function Video2Page({ projectId }: Video2PageProps) {
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <p className="text-xs text-slate-400 mb-4">将此镜头标记为已拍摄</p>
+            {shotNoDialogMode === 'markDone' && (
+              <p className="text-xs text-slate-400 mb-4">将此镜头标记为已拍摄</p>
+            )}
             <input
               type="text"
               value={shotNoInputValue}
