@@ -404,7 +404,7 @@ export function Video2Page({ projectId }: Video2PageProps) {
         body: JSON.stringify({ shotNo: shotNo.trim() })
       });
       setItems(prev => prev.map(it => it.id === item.id ? { ...it, shotNo: shotNo.trim() || undefined } : it));
-      showToast('镜头号已更新');
+      showToast('镜头编号已更新');
     } catch (e) {
       console.error('更新镜头号失败:', e);
     }
@@ -1473,7 +1473,15 @@ export function Video2Page({ projectId }: Video2PageProps) {
               placeholder="镜头编号（可留空）"
               className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:border-violet-400/50 outline-none text-sm transition mb-5"
               onKeyDown={(e) => {
-                if (e.key === 'Enter') confirmShotNo();
+                if (e.key === 'Enter') {
+                  if (shotNoDialogMode === 'edit' && showShotNoDialog) {
+                    updateShotNo(showShotNoDialog, shotNoInputValue);
+                    setShowShotNoDialog(null);
+                    setShotNoInputValue('');
+                  } else {
+                    confirmShotNo();
+                  }
+                }
                 if (e.key === 'Escape') { setShowShotNoDialog(null); setShotNoInputValue(''); }
               }}
               autoFocus
@@ -1484,7 +1492,15 @@ export function Video2Page({ projectId }: Video2PageProps) {
                 className="px-3 py-2 rounded-xl text-sm text-slate-400 hover:text-white hover:bg-white/5 transition"
               >取消</button>
               <button
-                onClick={confirmShotNo}
+                onClick={() => {
+                  if (shotNoDialogMode === 'edit' && showShotNoDialog) {
+                    updateShotNo(showShotNoDialog, shotNoInputValue);
+                    setShowShotNoDialog(null);
+                    setShotNoInputValue('');
+                  } else {
+                    confirmShotNo();
+                  }
+                }}
                 className="px-4 py-2 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white text-sm font-medium transition"
               >确认</button>
             </div>
