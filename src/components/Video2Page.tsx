@@ -1025,7 +1025,12 @@ export function Video2Page({ projectId }: Video2PageProps) {
                 </button>
               ) : (
                 <button
-                  onClick={(e) => { e.stopPropagation(); toggleStatus(item, true); }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (confirm('确认将此素材标记为未拍摄？')) {
+                      toggleStatus(item, true);
+                    }
+                  }}
                   className="inline-flex items-center gap-1.5 pl-1.5 pr-2 py-1.5 rounded-full text-xs font-medium border transition"
                   style={{
                     backgroundColor: 'rgba(34,197,94,0.15)',
@@ -1058,9 +1063,9 @@ export function Video2Page({ projectId }: Video2PageProps) {
                 borderColor: 'rgba(34,197,94,0.6)',
                 color: '#bbf7d0'
               }}
-              title={item.shotNo ? "点击修改镜头号" : "点击输入镜头号"}
+              title={item.shotNo ? "点击修改编号" : "点击输入编号"}
             >
-              {item.shotNo ? `镜头 ${item.shotNo}` : '无镜头编号'}
+              {item.shotNo ? `编号 ${item.shotNo}` : '无编号'}
             </button>
           )}
         </div>
@@ -1448,7 +1453,7 @@ export function Video2Page({ projectId }: Video2PageProps) {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => { setShowShotNoDialog(null); setShotNoInputValue(''); }}>
           <div className="w-full max-w-sm rounded-3xl border border-white/10 bg-slate-900/95 backdrop-blur-xl p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-base font-semibold">输入镜头号</h2>
+              <h2 className="text-base font-semibold">输入镜头编号</h2>
               <button onClick={() => { setShowShotNoDialog(null); setShotNoInputValue(''); }} className="w-8 h-8 rounded-full hover:bg-white/10 flex items-center justify-center">
                 <X className="w-4 h-4" />
               </button>
@@ -1473,7 +1478,7 @@ export function Video2Page({ projectId }: Video2PageProps) {
               <button
                 onClick={confirmShotNo}
                 className="px-4 py-2 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white text-sm font-medium transition"
-              >确认标记为已拍摄</button>
+              >确认</button>
             </div>
           </div>
         </div>
