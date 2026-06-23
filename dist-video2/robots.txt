@@ -1,0 +1,8 @@
+# robots.txt for Dalian Qizi Culture
+# https://www.robotstxt.org/robotstxt.html
+
+User-agent: *
+Allow: /
+
+# Sitemap location
+Sitemap: /sitemap.xml

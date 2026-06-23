@@ -55,7 +55,11 @@ function getVideoPoster(url: string): string {
   return '';
 }
 
-export function Video2ProjectList() {
+interface Video2ProjectListProps {
+  onSelectProject?: (projectId: number) => void;
+}
+
+export function Video2ProjectList({ onSelectProject }: Video2ProjectListProps) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -335,7 +339,11 @@ export function Video2ProjectList() {
   };
 
   const goToProject = (id: number) => {
-    window.location.href = `/video2/project/${id}`;
+    if (onSelectProject) {
+      onSelectProject(id);
+    } else {
+      window.location.href = `/video2/project/${id}`;
+    }
   };
 
   // 更新项目名称

@@ -6,6 +6,7 @@ import { ShareHint } from './WeChatShareHint';
 
 interface Video2PageProps {
   projectId: number;
+  onBack?: () => void;
 }
 
 interface MediaItem {
@@ -71,7 +72,7 @@ function timeAgo(dateStr: string): string {
   return `${Math.floor(days / 7)} 周前`;
 }
 
-export function Video2Page({ projectId }: Video2PageProps) {
+export function Video2Page({ projectId, onBack }: Video2PageProps) {
   const [project, setProject] = useState<Project | null>(null);
   const [scenes, setScenes] = useState<Scene[]>([]);
   const [items, setItems] = useState<MediaItem[]>([]);
@@ -874,7 +875,11 @@ export function Video2Page({ projectId }: Video2PageProps) {
   };
 
   const backToProjectList = () => {
-    window.location.href = '/video2';
+    if (onBack) {
+      onBack();
+    } else {
+      window.location.href = '/video2';
+    }
   };
 
   // ============ 渲染 ============
