@@ -82,6 +82,9 @@ export function Video2Page({ projectId }: Video2PageProps) {
   const [currentTab, setCurrentTab] = useState<'pending' | 'done' | 'trash'>('pending');
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
+  // 已拍摄按钮确认弹窗
+  const [showConfirmDialog, setShowConfirmDialog] = useState<MediaItem | null>(null);
+
   const [newSceneName, setNewSceneName] = useState('');
   const [showMoveModal, setShowMoveModal] = useState(false);
   const [renameSceneId, setRenameSceneId] = useState<number | null>(null);
@@ -1027,9 +1030,7 @@ export function Video2Page({ projectId }: Video2PageProps) {
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (confirm('确认将此素材标记为未拍摄？')) {
-                      toggleStatus(item, true);
-                    }
+                    setShowConfirmDialog(item);
                   }}
                   className="inline-flex items-center gap-1.5 pl-1.5 pr-2 py-1.5 rounded-full text-xs font-medium border transition"
                   style={{
@@ -1458,11 +1459,12 @@ export function Video2Page({ projectId }: Video2PageProps) {
                 <X className="w-4 h-4" />
               </button>
             </div>
+            <p className="text-xs text-slate-400 mb-4">将此镜头标记为已拍摄</p>
             <input
               type="text"
               value={shotNoInputValue}
               onChange={(e) => setShotNoInputValue(e.target.value)}
-              placeholder="镜头号（可留空）"
+              placeholder="镜头编号（可留空）"
               className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 focus:border-violet-400/50 outline-none text-sm transition mb-5"
               onKeyDown={(e) => {
                 if (e.key === 'Enter') confirmShotNo();
@@ -1477,6 +1479,34 @@ export function Video2Page({ projectId }: Video2PageProps) {
               >取消</button>
               <button
                 onClick={confirmShotNo}
+                className="px-4 py-2 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white text-sm font-medium transition"
+              >确认</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 已拍摄按钮确认弹窗 */}
+      {showConfirmDialog !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => setShowConfirmDialog(null)}>
+          <div className="w-full max-w-sm rounded-3xl border border-white/10 bg-slate-900/95 backdrop-blur-xl p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-base font-semibold">确认操作</h2>
+              <button onClick={() => setShowConfirmDialog(null)} className="w-8 h-8 rounded-full hover:bg-white/10 flex items-center justify-center">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-sm text-slate-300 mb-5">将此镜头标记为未拍摄</p>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                onClick={() => setShowConfirmDialog(null)}
+                className="px-3 py-2 rounded-xl text-sm text-slate-400 hover:text-white hover:bg-white/5 transition"
+              >取消</button>
+              <button
+                onClick={() => {
+                  if (showConfirmDialog) toggleStatus(showConfirmDialog, true);
+                  setShowConfirmDialog(null);
+                }}
                 className="px-4 py-2 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white text-sm font-medium transition"
               >确认</button>
             </div>
