@@ -916,6 +916,7 @@ export function Video2Page({ projectId }: Video2PageProps) {
             <img
               src={item.url}
               alt={item.title}
+              loading="lazy"
               className="w-full h-full object-cover"
               onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }}
             />
@@ -1042,8 +1043,8 @@ export function Video2Page({ projectId }: Video2PageProps) {
             </div>
           )}
 
-          {/* 右下角：镜头编号（已拍摄且存在 shotNo 时显示） */}
-          {currentTab !== 'trash' && item.status === 'done' && item.shotNo && (
+          {/* 右下角：镜头编号（已拍摄时显示，无 shotNo 显示"无镜头编号"） */}
+          {currentTab !== 'trash' && item.status === 'done' && (
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -1057,9 +1058,9 @@ export function Video2Page({ projectId }: Video2PageProps) {
                 borderColor: 'rgba(34,197,94,0.6)',
                 color: '#bbf7d0'
               }}
-              title="点击修改镜头号"
+              title={item.shotNo ? "点击修改镜头号" : "点击输入镜头号"}
             >
-              镜头 {item.shotNo}
+              {item.shotNo ? `镜头 ${item.shotNo}` : '无镜头编号'}
             </button>
           )}
         </div>

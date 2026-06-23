@@ -24,7 +24,8 @@ import { Login } from './components/admin/Login';
 import { Settings } from 'lucide-react';
 import { setupShareMetadata } from './lib/shareUtils';
 import { getHomeContent } from './data/store';
-import { Video2Page } from './components/Video2Page';
+// Video2Page 懒加载，减少初始 bundle 大小
+const Video2Page = React.lazy(() => import('./components/Video2Page').then(m => ({ default: m.Video2Page })));
 
 type Tab = 'home' | 'team' | 'services' | 'portfolio' | 'search';
 type AdminTab = 'dashboard' | 'portfolio' | 'categories' | 'featured' | 'home' | 'team' | 'storage';
@@ -128,7 +129,11 @@ export default function App() {
 
   // 视频片段管理页面（项目列表 + 项目详情）
   if (video2Route.page === 'project') {
-    return <Video2Page projectId={video2Route.projectId} />;
+    return (
+      <React.Suspense fallback={<div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-slate-900 via-violet-950 to-pink-950"><div className="animate-spin w-8 h-8 border-2 border-violet-400 border-t-transparent rounded-full" /></div>}>
+        <Video2Page projectId={video2Route.projectId} />
+      </React.Suspense>
+    );
   }
   if (video2Route.page === 'list') {
     // 懒加载 ProjectList 避免循环依赖
