@@ -20,8 +20,9 @@ IP地址: 45.77.46.164
 项目路径: /var/www/qizi-website
 服务管理: PM2
 PM2 进程名: qizi-website-server
-后端端口: 3000
-Nginx 配置: /etc/nginx/conf.d/qzwh.conf（或主配置文件）
+后端端口: 5000
+Nginx 配置: /etc/nginx/sites-available/qizi-website
+Nginx 模式: 全代理模式（所有请求转发给 Express）
 ```
 
 ### 1.2 GitHub 仓库信息
@@ -223,7 +224,7 @@ module.exports = {
       max_memory_restart: '500M',
       env: {
         NODE_ENV: 'production',
-        PORT: 3000,
+        PORT: 5000,
       },
       error_file: './logs/error.log',
       out_file: './logs/out.log',
@@ -239,15 +240,17 @@ module.exports = {
 
 ## 五、Nginx 配置要点
 
-参考配置文件：`nginx-qzwh.conf`
+服务器配置位置：`/etc/nginx/sites-available/qizi-website`
 
 关键配置项：
-1. **反向代理**：将请求转发到 `http://localhost:3000`
-2. **客户端上传大小**：`client_max_body_size 1024M`（支持大文件上传）
-3. **超时设置**：长超时支持视频上传
-4. **SSL**：HTTPS 配置（使用 Certbot）
-5. **子站分离**：`video.qiziwenhua.top` 独立 server 块，转发到端口 3001
-6. **旧路径重定向**：`/video2` 路径重定向到 `https://video.qiziwenhua.top`
+1. **全代理模式**：所有请求（包括静态资源）都转发到 Express `http://localhost:5000`
+2. **客户端上传大小**：`client_max_body_size 2048M`（支持大文件上传）
+3. **超时设置**：长超时支持视频上传（1800s）
+4. **SSL**：HTTPS 配置（使用 Let's Encrypt）
+5. **COOP/COEP 头**：支持 SharedArrayBuffer（FFmpeg WebAssembly 必需）
+6. **WebSocket 支持**：正确配置 Upgrade/Connection 头
+7. **子站分离**：`video.qiziwenhua.top` 独立 server 块，转发到端口 3001
+8. **旧路径重定向**：`/video2` 路径 301 重定向到 `https://video.qiziwenhua.top`
 
 ---
 
@@ -383,8 +386,8 @@ src/lib/shareUtils.ts
 
 ### 10.1 必需环境变量
 ```env
-# 服务端口
-PORT=3000
+# 服务端口（本地开发: 3000，生产环境: 5000）
+PORT=5000
 
 # 阿里云 OSS 配置
 VITE_OSS_REGION=oss-cn-beijing
