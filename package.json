@@ -8,10 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit",
-    "dev:video2": "vite --config vite.video2.config.ts",
-    "build:video2": "vite build --config vite.video2.config.ts && cd dist-video2 && copy index-video2.html index.html",
-    "server:video2": "node server/video2-server.js"
+    "lint": "tsc --noEmit"
   },
   "dependencies": {
     "@ffmpeg/ffmpeg": "^0.12.9",

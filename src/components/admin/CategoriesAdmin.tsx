@@ -1,8 +1,9 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿import { useState, useEffect } from 'react';
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿import { useState, useEffect } from 'react';
 import { Plus, GripVertical, ChevronUp, ChevronDown, Edit2, Trash2, Image, AlertCircle, Upload, Link as LinkIcon, Save, X, Sparkles } from 'lucide-react';
 import { getCategoriesWithDetails, addCategoryWithDetails, updateCategoryDetails, deleteCategoryWithDetails, CategoryWithDetails, updateCategoriesSortOrder } from '../../data/store';
 import { uploadImage } from '../../lib/ossUtils';
 import { generateCoverImage, generateIconSVG, ensureImageOnOSS } from '../../lib/aiGenerator';
+import { decodeHtmlEntities } from '../../lib/iconPresets';
 
 export function CategoriesAdmin() {
   const [categories, setCategories] = useState<CategoryWithDetails[]>([]);
@@ -455,7 +456,7 @@ export function CategoriesAdmin() {
                   </div>
                   <div className="w-16 h-16 rounded-xl bg-surface-container-low border border-white/5 flex items-center justify-center flex-shrink-0">
                     {formData.icon ? (
-                      <div dangerouslySetInnerHTML={{ __html: formData.icon }} className="w-10 h-10 text-primary flex items-center justify-center" />
+                      <div dangerouslySetInnerHTML={{ __html: decodeHtmlEntities(formData.icon) }} className="w-10 h-10 text-primary flex items-center justify-center" />
                     ) : (
                       <Image className="w-6 h-6 text-on-surface-variant" />
                     )}

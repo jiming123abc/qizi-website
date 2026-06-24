@@ -24,8 +24,6 @@ import { Login } from './components/admin/Login';
 import { Settings } from 'lucide-react';
 import { setupShareMetadata } from './lib/shareUtils';
 import { getHomeContent } from './data/store';
-// Video2Page 懒加载，减少初始 bundle 大小
-const Video2Page = React.lazy(() => import('./components/Video2Page').then(m => ({ default: m.Video2Page })));
 
 type Tab = 'home' | 'team' | 'services' | 'portfolio' | 'search';
 type AdminTab = 'dashboard' | 'portfolio' | 'categories' | 'featured' | 'home' | 'team' | 'storage';
@@ -38,23 +36,8 @@ export default function App() {
   const [isAdminMode, setIsAdminMode] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [adminTab, setAdminTab] = useState<AdminTab>('dashboard');
-  // video2 路由状态
-  const [video2Route, setVideo2Route] = useState<{ page: 'list' } | { page: 'project'; projectId: number }>({ page: 'list' });
 
   useEffect(() => {
-    // 检测 video2 路径并解析路由
-    const path = window.location.pathname;
-    const video2ProjectMatch = path.match(/^\/video2\/project\/(\d+)$/);
-    if (video2ProjectMatch) {
-      const projectId = parseInt(video2ProjectMatch[1]);
-      setVideo2Route({ page: 'project', projectId });
-      return;
-    }
-    if (path === '/video2' || path.startsWith('/video2/')) {
-      setVideo2Route({ page: 'list' });
-      return;
-    }
-
     const params = new URLSearchParams(window.location.search);
     const id = params.get('id');
     if (id) {
@@ -126,24 +109,6 @@ export default function App() {
   };
 
   const navTab = activeTab === 'search' ? 'home' : activeTab;
-
-  // 视频片段管理页面（项目列表 + 项目详情）
-  if (video2Route.page === 'project') {
-    return (
-      <React.Suspense fallback={<div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-slate-900 via-violet-950 to-pink-950"><div className="animate-spin w-8 h-8 border-2 border-violet-400 border-t-transparent rounded-full" /></div>}>
-        <Video2Page projectId={video2Route.projectId} />
-      </React.Suspense>
-    );
-  }
-  if (video2Route.page === 'list') {
-    // 懒加载 ProjectList 避免循环依赖
-    const ProjectList = React.lazy(() => import('./components/Video2ProjectList').then(m => ({ default: m.Video2ProjectList })));
-    return (
-      <React.Suspense fallback={<div className="flex items-center justify-center min-h-screen"><div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full" /></div>}>
-        <ProjectList />
-      </React.Suspense>
-    );
-  }
 
   if (isAdminMode) {
     if (!isLoggedIn) {

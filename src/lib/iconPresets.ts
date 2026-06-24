@@ -1161,6 +1161,13 @@ export function getIconByName(name: string): string | null {
   return match?.svg || null;
 }
 
+export function decodeHtmlEntities(str: string): string {
+  if (!str) return str;
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(str, 'text/html');
+  return doc.documentElement.textContent || str;
+}
+
 export default {
   iconPresets,
   matchIconByKeywords,
