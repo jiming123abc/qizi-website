@@ -83,6 +83,7 @@ export function PortfolioAdmin() {
   const [isCapturing, setIsCapturing] = useState(false);
   const [captureMessage, setCaptureMessage] = useState<string>('');
   const [selectedFrameIndex, setSelectedFrameIndex] = useState<number | null>(null);
+  const [coverManuallySet, setCoverManuallySet] = useState(false);
 
   const [formData, setFormData] = useState({
     title: '',
@@ -238,6 +239,34 @@ export function PortfolioAdmin() {
     setSelectedFrameIndex(null);
   };
 
+  const autoCaptureFirstFrame = async (videoUrl: string) => {
+    if (coverManuallySet || formData.img) return;
+    if (!videoUrl) return;
+
+    try {
+      setCaptureMessage('正在自动获取视频封面...');
+      const response = await fetch('/api/video/snapshots', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ videoUrl, count: 1 })
+      });
+      const data = await response.json();
+      if (data.success && data.urls && data.urls.length > 0) {
+        const firstFrame = data.urls[0];
+        setCapturedFrames(data.urls);
+        setSelectedFrameIndex(0);
+        setFormData(prev => ({ ...prev, img: firstFrame }));
+        setImgSourceType('url');
+        setCaptureMessage('已自动设置视频首帧为封面，可手动上传或截取更换');
+      } else {
+        setCaptureMessage('自动封面获取失败，可手动上传封面或手动截取');
+      }
+    } catch (error) {
+      console.error('自动获取视频封面失败:', error);
+      setCaptureMessage('自动封面获取失败，可手动上传封面或手动截取');
+    }
+  };
+
   const handleCaptureFrames = async () => {
     if (!formData.videoUrl) {
       alert('请先上传视频或填写视频地址');
@@ -272,6 +301,7 @@ export function PortfolioAdmin() {
     setSelectedFrameIndex(index);
     setFormData(prev => ({ ...prev, img: url }));
     setImgSourceType('url');
+    setCoverManuallySet(true);
     setCaptureMessage(`已选择第 ${index + 1} 张画面作为封面`);
   };
 
@@ -279,6 +309,7 @@ export function PortfolioAdmin() {
     setImgSourceType('upload');
     setVideoSourceType('upload');
     resetCaptureState();
+    setCoverManuallySet(false);
     setFormData({
       title: '',
       category: '', // 暂时留空，等 categories 加载完成后由 useEffect 设置
@@ -300,6 +331,7 @@ export function PortfolioAdmin() {
     setImgSourceType(item.img && item.img.startsWith('http') ? 'url' : 'upload');
     setVideoSourceType(item.videoUrl && item.videoUrl.startsWith('http') ? 'url' : 'upload');
     resetCaptureState();
+    setCoverManuallySet(!!item.img);
     setEditingItem(item);
     setFormData({
       title: item.title || '',
@@ -346,6 +378,7 @@ export function PortfolioAdmin() {
       }, forceLocal);
       
       setFormData(prev => ({ ...prev, img: result.url }));
+      setCoverManuallySet(true);
       
       setImageUploadStatus(prev => ({ 
         ...prev,
@@ -400,6 +433,7 @@ export function PortfolioAdmin() {
 
         setFormData(prev => ({ ...prev, videoUrl: result.url }));
         setVideoUploadStatus(prev => ({ ...prev, phase: 'done', progress: 100 }));
+        autoCaptureFirstFrame(result.url);
         setIsLoading(false);
         return;
       }
@@ -461,6 +495,7 @@ export function PortfolioAdmin() {
 
       setFormData(prev => ({ ...prev, videoUrl: result.url }));
       setVideoUploadStatus(prev => ({ ...prev, phase: 'done', progress: 100 }));
+      autoCaptureFirstFrame(result.url);
       setIsLoading(false);
     } catch (error) {
       const uploadError = error as UploadError;
@@ -502,6 +537,7 @@ export function PortfolioAdmin() {
 
       setFormData(prev => ({ ...prev, videoUrl: result.url }));
       setVideoUploadStatus(prev => ({ ...prev, phase: 'done', progress: 100 }));
+      autoCaptureFirstFrame(result.url);
       setIsLoading(false);
     } catch (error) {
       const uploadError = error as UploadError;
@@ -533,6 +569,7 @@ export function PortfolioAdmin() {
       });
       setFormData(prev => ({ ...prev, videoUrl: result.url }));
       setVideoUploadStatus(prev => ({ ...prev, phase: 'done', progress: 100 }));
+      autoCaptureFirstFrame(result.url);
       setIsLoading(false);
     } catch (error) {
       const uploadError = error as UploadError;
@@ -555,6 +592,7 @@ export function PortfolioAdmin() {
       progress: 100, 
       message: '已使用原始视频。建议后续手动压缩后替换。' 
     });
+    autoCaptureFirstFrame(pendingCompressionFailedUrl);
   };
 
   const handleDiscardAfterCompressionFailed = () => {
@@ -902,124 +940,6 @@ export function PortfolioAdmin() {
               </div>
             </div>
 
-            <div>
-              <label className="block text-sm font-label text-on-surface mb-2">封面图片 *</label>
-              <div className="flex gap-2 mb-3">
-                <button
-                  onClick={() => setImgSourceType('upload')}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-all ${
-                    imgSourceType === 'upload'
-                      ? 'bg-primary/20 border-primary/50 text-primary'
-                      : 'bg-surface-container border-white/10 text-on-surface-variant hover:text-on-surface'
-                  }`}
-                >
-                  <Upload className="w-4 h-4" />
-                  上传图片
-                </button>
-                <button
-                  onClick={() => setImgSourceType('url')}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-all ${
-                    imgSourceType === 'url'
-                      ? 'bg-primary/20 border-primary/50 text-primary'
-                      : 'bg-surface-container border-white/10 text-on-surface-variant hover:text-on-surface'
-                  }`}
-                >
-                  <Link className="w-4 h-4" />
-                  网络地址
-                </button>
-              </div>
-
-              <div className="relative">
-                {imgSourceType === 'upload' ? (
-                  formData.img ? (
-                    <div className="relative rounded-xl overflow-hidden border border-white/10">
-                      <img src={formData.img} alt="封面预览" className="w-full h-48 object-cover" />
-                      <button
-                        onClick={() => setFormData(prev => ({ ...prev, img: '' }))}
-                        className="absolute top-2 right-2 p-2 rounded-lg bg-black/50 text-white hover:bg-black/70 transition-colors"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-                  ) : (
-                    <label className="flex flex-col items-center justify-center w-full h-48 rounded-xl border-2 border-dashed border-white/20 cursor-pointer hover:border-primary/50 transition-colors">
-                      <FileImage className="w-8 h-8 text-on-surface-variant mb-2" />
-                      <span className="text-sm text-on-surface-variant">点击上传封面图片</span>
-                      <span className="text-xs text-on-surface-variant/50 mt-1">支持 JPG、PNG、WebP 格式</span>
-                      <input
-                        type="file"
-                        accept="image/jpeg,image/png,image/webp,image/gif"
-                        onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (file) handleImageUpload(file);
-                        }}
-                        className="hidden"
-                      />
-                    </label>
-                  )
-                ) : (
-                  <>
-                    <input
-                      type="text"
-                      value={formData.img}
-                      onChange={(e) => setFormData(prev => ({ ...prev, img: e.target.value }))}
-                      className="w-full px-4 py-3 rounded-xl bg-surface-container border border-white/10 text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none focus:border-primary/50 transition-colors"
-                      placeholder="请输入图片URL地址"
-                    />
-                    <p className="text-xs text-on-surface-variant/50 mt-1">
-                      可从阿里云OSS获取图片地址，格式如：https://xxx.oss-cn-beijing.aliyuncs.com/xxx.jpg
-                    </p>
-                    {formData.img && (
-                      <div className="mt-3 rounded-xl overflow-hidden border border-white/10">
-                        <img 
-                          src={formData.img} 
-                          alt="封面预览" 
-                          className="w-full h-48 object-cover" 
-                        />
-                      </div>
-                    )}
-                  </>
-                )}
-
-                {/* Image Upload Progress */}
-                {imageUploadStatus.phase !== 'idle' && (
-                  <div className="mt-3 p-4 rounded-xl bg-surface-container border border-white/10">
-                    <div className="flex items-start gap-3">
-                      {imageUploadStatus.phase === 'uploading' && imageUploadStatus.progress < 100 && (
-                        <Loader2 className="w-4 h-4 text-secondary animate-spin mt-0.5 flex-shrink-0" />
-                      )}
-                      {imageUploadStatus.phase === 'done' && imageUploadStatus.message.includes('失败') && (
-                        <AlertCircle className="w-4 h-4 text-red-400 mt-0.5 flex-shrink-0" />
-                      )}
-                      {imageUploadStatus.phase === 'done' && !imageUploadStatus.message.includes('失败') && (
-                        <Check className="w-4 h-4 text-green-400 mt-0.5 flex-shrink-0" />
-                      )}
-                      <div className="flex-1">
-                        <div className={`text-sm whitespace-pre-line ${imageUploadStatus.message.includes('失败') ? 'text-red-400' : 'text-on-surface-variant'}`}>
-                          {imageUploadStatus.message}
-                        </div>
-                        {imageUploadStatus.phase !== 'done' && imageUploadStatus.progress > 0 && (
-                          <div className="text-xs text-on-surface-variant/70 mt-1">
-                            进度：{imageUploadStatus.progress}%
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    {imageUploadStatus.phase !== 'done' && (
-                      <div className="mt-3">
-                        <div className="w-full bg-white/5 rounded-full h-3 overflow-hidden">
-                          <div 
-                            className="h-full rounded-full bg-gradient-to-r from-primary to-secondary transition-all duration-300"
-                            style={{ width: `${imageUploadStatus.progress}%` }}
-                          />
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-
             {formData.type === 'video' && (
               <div>
                 <label className="block text-sm font-label text-on-surface mb-2">视频</label>
@@ -1225,6 +1145,262 @@ export function PortfolioAdmin() {
                     )}
                   </div>
                 )}
+              </div>
+            )}
+
+            {formData.type === 'video' && (
+              <div>
+                <label className="block text-sm font-label text-on-surface mb-2">封面图片</label>
+                <div className="flex gap-2 mb-3">
+                  <button
+                    onClick={() => setImgSourceType('upload')}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-all ${
+                      imgSourceType === 'upload'
+                        ? 'bg-primary/20 border-primary/50 text-primary'
+                        : 'bg-surface-container border-white/10 text-on-surface-variant hover:text-on-surface'
+                    }`}
+                  >
+                    <Upload className="w-4 h-4" />
+                    上传图片
+                  </button>
+                  <button
+                    onClick={() => setImgSourceType('url')}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-all ${
+                      imgSourceType === 'url'
+                        ? 'bg-primary/20 border-primary/50 text-primary'
+                        : 'bg-surface-container border-white/10 text-on-surface-variant hover:text-on-surface'
+                    }`}
+                  >
+                    <Link className="w-4 h-4" />
+                    网络地址
+                  </button>
+                </div>
+
+                <div className="relative">
+                  {imgSourceType === 'upload' ? (
+                    formData.img ? (
+                      <div className="relative rounded-xl overflow-hidden border border-white/10">
+                        <img src={formData.img} alt="封面预览" className="w-full h-48 object-cover" />
+                        <button
+                          onClick={() => {
+                            setFormData(prev => ({ ...prev, img: '' }));
+                            setCoverManuallySet(false);
+                          }}
+                          className="absolute top-2 right-2 p-2 rounded-lg bg-black/50 text-white hover:bg-black/70 transition-colors"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ) : (
+                      <label className="flex flex-col items-center justify-center w-full h-48 rounded-xl border-2 border-dashed border-white/20 cursor-pointer hover:border-primary/50 transition-colors">
+                        <FileImage className="w-8 h-8 text-on-surface-variant mb-2" />
+                        <span className="text-sm text-on-surface-variant">点击上传封面图片</span>
+                        <span className="text-xs text-on-surface-variant/50 mt-1">支持 JPG、PNG、WebP 格式</span>
+                        <input
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp,image/gif"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) handleImageUpload(file);
+                          }}
+                          className="hidden"
+                        />
+                      </label>
+                    )
+                  ) : (
+                    <>
+                      <input
+                        type="text"
+                        value={formData.img}
+                        onChange={(e) => setFormData(prev => ({ ...prev, img: e.target.value }))}
+                        onBlur={() => {
+                          if (formData.img) {
+                            setCoverManuallySet(true);
+                          }
+                        }}
+                        className="w-full px-4 py-3 rounded-xl bg-surface-container border border-white/10 text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none focus:border-primary/50 transition-colors"
+                        placeholder="请输入图片URL地址"
+                      />
+                      <p className="text-xs text-on-surface-variant/50 mt-1">
+                        可从阿里云OSS获取图片地址，格式如：https://xxx.oss-cn-beijing.aliyuncs.com/xxx.jpg
+                      </p>
+                      {formData.img && (
+                        <div className="mt-3 rounded-xl overflow-hidden border border-white/10">
+                          <img 
+                            src={formData.img} 
+                            alt="封面预览" 
+                            className="w-full h-48 object-cover" 
+                          />
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {/* Image Upload Progress */}
+                  {imageUploadStatus.phase !== 'idle' && (
+                    <div className="mt-3 p-4 rounded-xl bg-surface-container border border-white/10">
+                      <div className="flex items-start gap-3">
+                        {imageUploadStatus.phase === 'uploading' && imageUploadStatus.progress < 100 && (
+                          <Loader2 className="w-4 h-4 text-secondary animate-spin mt-0.5 flex-shrink-0" />
+                        )}
+                        {imageUploadStatus.phase === 'done' && imageUploadStatus.message.includes('失败') && (
+                          <AlertCircle className="w-4 h-4 text-red-400 mt-0.5 flex-shrink-0" />
+                        )}
+                        {imageUploadStatus.phase === 'done' && !imageUploadStatus.message.includes('失败') && (
+                          <Check className="w-4 h-4 text-green-400 mt-0.5 flex-shrink-0" />
+                        )}
+                        <div className="flex-1">
+                          <div className={`text-sm whitespace-pre-line ${imageUploadStatus.message.includes('失败') ? 'text-red-400' : 'text-on-surface-variant'}`}>
+                            {imageUploadStatus.message}
+                          </div>
+                          {imageUploadStatus.phase !== 'done' && imageUploadStatus.progress > 0 && (
+                            <div className="text-xs text-on-surface-variant/70 mt-1">
+                              进度：{imageUploadStatus.progress}%
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      {imageUploadStatus.phase !== 'done' && (
+                        <div className="mt-3">
+                          <div className="w-full bg-white/5 rounded-full h-3 overflow-hidden">
+                            <div 
+                              className="h-full rounded-full bg-gradient-to-r from-primary to-secondary transition-all duration-300"
+                              style={{ width: `${imageUploadStatus.progress}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {formData.type === 'image' && (
+              <div>
+                <label className="block text-sm font-label text-on-surface mb-2">封面图片 *</label>
+                <div className="flex gap-2 mb-3">
+                  <button
+                    onClick={() => setImgSourceType('upload')}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-all ${
+                      imgSourceType === 'upload'
+                        ? 'bg-primary/20 border-primary/50 text-primary'
+                        : 'bg-surface-container border-white/10 text-on-surface-variant hover:text-on-surface'
+                    }`}
+                  >
+                    <Upload className="w-4 h-4" />
+                    上传图片
+                  </button>
+                  <button
+                    onClick={() => setImgSourceType('url')}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-all ${
+                      imgSourceType === 'url'
+                        ? 'bg-primary/20 border-primary/50 text-primary'
+                        : 'bg-surface-container border-white/10 text-on-surface-variant hover:text-on-surface'
+                    }`}
+                  >
+                    <Link className="w-4 h-4" />
+                    网络地址
+                  </button>
+                </div>
+
+                <div className="relative">
+                  {imgSourceType === 'upload' ? (
+                    formData.img ? (
+                      <div className="relative rounded-xl overflow-hidden border border-white/10">
+                        <img src={formData.img} alt="封面预览" className="w-full h-48 object-cover" />
+                        <button
+                          onClick={() => {
+                            setFormData(prev => ({ ...prev, img: '' }));
+                            setCoverManuallySet(false);
+                          }}
+                          className="absolute top-2 right-2 p-2 rounded-lg bg-black/50 text-white hover:bg-black/70 transition-colors"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ) : (
+                      <label className="flex flex-col items-center justify-center w-full h-48 rounded-xl border-2 border-dashed border-white/20 cursor-pointer hover:border-primary/50 transition-colors">
+                        <FileImage className="w-8 h-8 text-on-surface-variant mb-2" />
+                        <span className="text-sm text-on-surface-variant">点击上传封面图片</span>
+                        <span className="text-xs text-on-surface-variant/50 mt-1">支持 JPG、PNG、WebP 格式</span>
+                        <input
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp,image/gif"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) handleImageUpload(file);
+                          }}
+                          className="hidden"
+                        />
+                      </label>
+                    )
+                  ) : (
+                    <>
+                      <input
+                        type="text"
+                        value={formData.img}
+                        onChange={(e) => setFormData(prev => ({ ...prev, img: e.target.value }))}
+                        onBlur={() => {
+                          if (formData.img) {
+                            setCoverManuallySet(true);
+                          }
+                        }}
+                        className="w-full px-4 py-3 rounded-xl bg-surface-container border border-white/10 text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none focus:border-primary/50 transition-colors"
+                        placeholder="请输入图片URL地址"
+                      />
+                      <p className="text-xs text-on-surface-variant/50 mt-1">
+                        可从阿里云OSS获取图片地址，格式如：https://xxx.oss-cn-beijing.aliyuncs.com/xxx.jpg
+                      </p>
+                      {formData.img && (
+                        <div className="mt-3 rounded-xl overflow-hidden border border-white/10">
+                          <img 
+                            src={formData.img} 
+                            alt="封面预览" 
+                            className="w-full h-48 object-cover" 
+                          />
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {/* Image Upload Progress */}
+                  {imageUploadStatus.phase !== 'idle' && (
+                    <div className="mt-3 p-4 rounded-xl bg-surface-container border border-white/10">
+                      <div className="flex items-start gap-3">
+                        {imageUploadStatus.phase === 'uploading' && imageUploadStatus.progress < 100 && (
+                          <Loader2 className="w-4 h-4 text-secondary animate-spin mt-0.5 flex-shrink-0" />
+                        )}
+                        {imageUploadStatus.phase === 'done' && imageUploadStatus.message.includes('失败') && (
+                          <AlertCircle className="w-4 h-4 text-red-400 mt-0.5 flex-shrink-0" />
+                        )}
+                        {imageUploadStatus.phase === 'done' && !imageUploadStatus.message.includes('失败') && (
+                          <Check className="w-4 h-4 text-green-400 mt-0.5 flex-shrink-0" />
+                        )}
+                        <div className="flex-1">
+                          <div className={`text-sm whitespace-pre-line ${imageUploadStatus.message.includes('失败') ? 'text-red-400' : 'text-on-surface-variant'}`}>
+                            {imageUploadStatus.message}
+                          </div>
+                          {imageUploadStatus.phase !== 'done' && imageUploadStatus.progress > 0 && (
+                            <div className="text-xs text-on-surface-variant/70 mt-1">
+                              进度：{imageUploadStatus.progress}%
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      {imageUploadStatus.phase !== 'done' && (
+                        <div className="mt-3">
+                          <div className="w-full bg-white/5 rounded-full h-3 overflow-hidden">
+                            <div 
+                              className="h-full rounded-full bg-gradient-to-r from-primary to-secondary transition-all duration-300"
+                              style={{ width: `${imageUploadStatus.progress}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 

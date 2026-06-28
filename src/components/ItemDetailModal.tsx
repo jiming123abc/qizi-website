@@ -131,14 +131,14 @@ export function ItemDetailModal({ isOpen, onClose, item, onShare }: ItemDetailMo
           <div className={`absolute top-0 left-0 w-full h-64 ${bgGlow} blur-[80px] -z-10 opacity-50`}></div>
 
           {/* 媒体区域 */}
-          <div className="relative aspect-video shrink-0 bg-black">
+          <div className="relative w-full shrink-0 bg-black aspect-video max-h-[60vh]">
             {/* 视频类型 */}
             {isVideoItem ? (
               <div className="relative w-full h-full group">
                 <video
                   ref={videoRef}
                   src={safeItem.videoUrl}
-                  className="w-full h-full object-cover cursor-pointer"
+                  className="w-full h-full object-contain cursor-pointer"
                   loop
                   controls
                   playsInline
@@ -178,13 +178,13 @@ export function ItemDetailModal({ isOpen, onClose, item, onShare }: ItemDetailMo
                   style={{ transform: `translateX(-${currentSlideIndex * 100}%)` }}
                 >
                   <div 
-                    className="w-full h-full flex-shrink-0 cursor-pointer"
+                    className="w-full h-full flex-shrink-0 cursor-pointer flex items-center justify-center"
                     onClick={() => openImageViewer(imageSrc)}
                   >
                     <img
                       src={imageSrc}
                       alt={title}
-                      className="w-full h-full object-cover"
+                      className="w-full h-full object-contain"
                       loading="lazy"
                       onError={(e) => {
                         (e.target as HTMLImageElement).src = '/images/hero-home.png';
@@ -194,13 +194,13 @@ export function ItemDetailModal({ isOpen, onClose, item, onShare }: ItemDetailMo
                   {imagesList.map((imgUrl: string, idx: number) => (
                     <div 
                       key={idx}
-                      className="w-full h-full flex-shrink-0 cursor-pointer"
+                      className="w-full h-full flex-shrink-0 cursor-pointer flex items-center justify-center"
                       onClick={() => openImageViewer(imgUrl)}
                     >
                       <img
                         src={imgUrl}
                         alt={`${title} ${idx + 1}`}
-                        className="w-full h-full object-cover"
+                        className="w-full h-full object-contain"
                         loading="lazy"
                         onError={(e) => {
                           (e.target as HTMLImageElement).src = '/images/hero-home.png';
@@ -248,13 +248,13 @@ export function ItemDetailModal({ isOpen, onClose, item, onShare }: ItemDetailMo
             ) : (
               // 单图
               <div 
-                className="w-full h-full cursor-pointer"
+                className="w-full h-full cursor-pointer flex items-center justify-center"
                 onClick={() => openImageViewer(imageSrc)}
               >
                 <img
                   src={imageSrc}
                   alt={title}
-                  className="w-full h-full object-cover"
+                  className="w-full h-full object-contain"
                   onError={(e) => {
                     (e.target as HTMLImageElement).src = '/images/hero-home.png';
                   }}
@@ -265,7 +265,7 @@ export function ItemDetailModal({ isOpen, onClose, item, onShare }: ItemDetailMo
           </div>
 
           {/* 内容区域 */}
-          <div className="p-6 flex-1 flex flex-col -mt-8 relative z-10">
+          <div className="p-6 flex-1 flex flex-col -mt-8 relative z-10 overflow-y-auto hide-scrollbar">
             {showTags && (
               <div className="flex items-center gap-2 mb-4">
                 {category && (
