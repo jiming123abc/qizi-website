@@ -36,13 +36,13 @@ export function AdminLayout({ activeTab, onTabChange, onLogout, children }: Admi
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   return (
-    <div className="flex h-screen bg-surface-container-low">
+    <div className="min-h-screen bg-surface-container-low">
       <aside 
-        className={`fixed md:sticky inset-y-0 left-0 z-50 w-64 bg-surface-container transform transition-transform duration-300 ${
+        className={`fixed inset-y-0 left-0 z-50 w-64 bg-surface-container transform transition-transform duration-300 ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
         }`}
       >
-        <div className="flex flex-col h-full">
+        <div className="flex flex-col h-full overflow-y-auto hide-scrollbar">
           <div className="p-6 border-b border-white/10">
             <h1 className="font-headline text-xl font-bold text-primary">管理后台</h1>
             <p className="text-xs text-on-surface-variant mt-1">AI Studio Dashboard</p>
@@ -94,7 +94,7 @@ export function AdminLayout({ activeTab, onTabChange, onLogout, children }: Admi
         <Menu className="w-5 h-5" />
       </button>
 
-      <main className="flex-1 ml-64 min-h-screen">
+      <main className="md:ml-64 min-h-screen">
         {children}
       </main>
     </div>
