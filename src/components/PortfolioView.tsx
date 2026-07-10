@@ -63,8 +63,7 @@ export function PortfolioView() {
     }
   }, [allItems]);
 
-  // Update share metadata when opening/closing detail modal
-  // Do NOT update URL to avoid WeChat bottom bar
+  // Update share metadata and URL when opening/closing detail modal
   useEffect(() => {
     if (selectedItem) {
       // When opening detail, set share info for the item
@@ -76,6 +75,7 @@ export function PortfolioView() {
         link: shareUrl,
         imgUrl: selectedItem.img
       });
+      updateUrlForShare(selectedItem.id);
     } else {
       // When closing, restore default share metadata
       setupShareMetadata({
@@ -84,6 +84,7 @@ export function PortfolioView() {
         link: window.location.origin,
         imgUrl: defaultImage
       });
+      restoreDefaultUrl();
     }
   }, [selectedItem, defaultImage, defaultShareTitle, defaultShareDescription]);
 
@@ -92,7 +93,6 @@ export function PortfolioView() {
     
     // 复制主应用链接带参数
     const shareUrl = `${window.location.origin}/?id=${selectedItem.id}`;
-    updateUrlForShare(selectedItem.id);
     const copied = await copyToClipboard(shareUrl);
 
     if (copied) {
@@ -102,13 +102,11 @@ export function PortfolioView() {
 
   const handleCloseShareHint = () => {
     setIsWeChatHintVisible(false);
-    restoreDefaultUrl();
   };
 
   const handleCloseDetail = () => {
     setSelectedItem(null);
     setIsWeChatHintVisible(false);
-    restoreDefaultUrl();
   };
 
   const filteredItems = activeCategory === '全部作品' 

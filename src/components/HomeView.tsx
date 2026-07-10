@@ -216,8 +216,7 @@ export function HomeView() {
     }
   }, [featuredItems, allPortfolioItems]);
 
-  // Update share metadata when opening/closing detail modal
-  // Do NOT update URL to avoid WeChat bottom bar
+  // Update share metadata and URL when opening/closing detail modal
   useEffect(() => {
     if (selectedItem) {
       // When opening detail, set share info for the item
@@ -233,6 +232,7 @@ export function HomeView() {
         shareTitle = ('title' in selectedItem ? selectedItem.title : '大连柒子文化发展有限公司');
         shareDesc = ('shortDesc' in selectedItem ? selectedItem.shortDesc : selectedItem.category) || '诚信立足 创新致远';
         shareImg = ('img' in selectedItem ? selectedItem.img : homeContent.heroImage || '/images/hero-home.png');
+        updateUrlForShare(selectedItem.id);
       } else {
         // 核心业务或分类，使用首页
         shareUrl = window.location.origin;
@@ -255,6 +255,7 @@ export function HomeView() {
         link: window.location.origin,
         imgUrl: homeContent.heroImage || '/images/hero-home.png'
       });
+      restoreDefaultUrl();
     }
   }, [selectedItem, homeContent]);
 
@@ -267,7 +268,6 @@ export function HomeView() {
     if (isPortfolioShareItem(selectedItem)) {
       // Portfolio item，使用主应用链接
       shareUrl = `${window.location.origin}/?id=${selectedItem.id}`;
-      updateUrlForShare(selectedItem.id);
     } else {
       // 核心业务或分类，使用首页
       shareUrl = window.location.origin;
@@ -282,13 +282,11 @@ export function HomeView() {
 
   const handleCloseShareHint = () => {
     setIsWeChatHintVisible(false);
-    restoreDefaultUrl();
   };
 
   const handleCloseDetail = () => {
     setSelectedItem(null);
     setIsWeChatHintVisible(false);
-    restoreDefaultUrl();
   };
 
   const scroll = (direction: 'left' | 'right') => {
