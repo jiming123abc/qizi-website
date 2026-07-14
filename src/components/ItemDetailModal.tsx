@@ -138,25 +138,13 @@ export function ItemDetailModal({ isOpen, onClose, item, onShare }: ItemDetailMo
                 <video
                   ref={videoRef}
                   src={safeItem.videoUrl}
-                  className="w-full h-full object-contain cursor-pointer"
+                  className="w-full h-full object-contain"
                   loop
                   controls
                   playsInline
-                  onClick={toggleVideoPlay}
                   onPlay={() => setIsVideoPlaying(true)}
                   onPause={() => setIsVideoPlaying(false)}
                 />
-                {/* 播放按钮 - 只在暂停时显示 */}
-                {!isVideoPlaying && (
-                  <div
-                    className="absolute inset-0 flex items-center justify-center bg-black/30 transition-opacity duration-300 cursor-pointer"
-                    onClick={toggleVideoPlay}
-                  >
-                    <div className="w-16 h-16 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center border border-white/30 group-hover:scale-110 transition-transform">
-                      <Play className="text-white w-8 h-8 ml-1" />
-                    </div>
-                  </div>
-                )}
                 <div className="absolute inset-0 bg-gradient-to-t from-surface-container-low via-surface-container-low/20 to-transparent pointer-events-none"></div>
               </div>
             ) : hasMultipleImages ? (
