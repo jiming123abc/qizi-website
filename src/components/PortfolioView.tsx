@@ -119,6 +119,9 @@ export function PortfolioView({ onBackToHome }: PortfolioViewProps) {
     setSelectedItem(null);
     setIsWeChatHintVisible(false);
     if (isFromShareLinkRef.current && onBackToHome) {
+      // 必须在切换标签前同步清除URL中的?id参数，
+      // 否则HomeView挂载后会再次检测到?id并重新打开作品
+      restoreDefaultUrl();
       onBackToHome();
     }
   };
