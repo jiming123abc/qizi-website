@@ -104,6 +104,7 @@ const featuredWorks = [
 export function HomeView() {
   const [selectedItem, setSelectedItem] = useState<typeof coreBusiness[0] | (PortfolioItem & { featuredId: string }) | (CategoryWithDetails & { id: string }) | null>(null);
   const [isWeChatHintVisible, setIsWeChatHintVisible] = useState(false);
+  const hasOpenedItemRef = useRef(false);
   const [featuredItems, setFeaturedItems] = useState<(PortfolioItem & { featuredId: string })[]>([]);
   const [allPortfolioItems, setAllPortfolioItems] = useState<PortfolioItem[]>([]);
   const [homeContent, setHomeContent] = useState<HomeContent>({
@@ -219,6 +220,7 @@ export function HomeView() {
   // Update share metadata and URL when opening/closing detail modal
   useEffect(() => {
     if (selectedItem) {
+      hasOpenedItemRef.current = true;
       // When opening detail, set share info for the item
       let shareTitle: string;
       let shareDesc: string;
@@ -255,7 +257,10 @@ export function HomeView() {
         link: window.location.origin,
         imgUrl: homeContent.heroImage || '/images/hero-home.png'
       });
-      restoreDefaultUrl();
+      // 只有用户主动关闭作品后才恢复URL，避免初始加载时删除?id=参数
+      if (hasOpenedItemRef.current) {
+        restoreDefaultUrl();
+      }
     }
   }, [selectedItem, homeContent]);
 

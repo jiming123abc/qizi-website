@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { ChevronLeft, ChevronRight, Play } from 'lucide-react';
 import { ItemDetailModal } from './ItemDetailModal';
 import { isWeChat, copyToClipboard, setupShareMetadata } from '../lib/shareUtils';
@@ -15,6 +15,7 @@ export function PortfolioView() {
   const [defaultShareTitle, setDefaultShareTitle] = useState('大连柒子文化发展有限公司');
   const [defaultShareDescription, setDefaultShareDescription] = useState('诚信立足 创新致远');
   const [isWeChatHintVisible, setIsWeChatHintVisible] = useState(false);
+  const hasOpenedItemRef = useRef(false);
 
   const updateUrlForShare = (id: number) => {
     const url = new URL(window.location.href);
@@ -66,6 +67,7 @@ export function PortfolioView() {
   // Update share metadata and URL when opening/closing detail modal
   useEffect(() => {
     if (selectedItem) {
+      hasOpenedItemRef.current = true;
       // When opening detail, set share info for the item
       const shareUrl = `${window.location.origin}/?id=${selectedItem.id}`;
       
@@ -84,7 +86,10 @@ export function PortfolioView() {
         link: window.location.origin,
         imgUrl: defaultImage
       });
-      restoreDefaultUrl();
+      // 只有用户主动关闭作品后才恢复URL，避免初始加载时删除?id=参数
+      if (hasOpenedItemRef.current) {
+        restoreDefaultUrl();
+      }
     }
   }, [selectedItem, defaultImage, defaultShareTitle, defaultShareDescription]);
 
