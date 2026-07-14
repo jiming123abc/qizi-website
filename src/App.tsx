@@ -144,7 +144,7 @@ export default function App() {
             {activeTab === 'home' && <HomeView />}
             {activeTab === 'team' && <TeamView />}
             {activeTab === 'services' && <ServicesView />}
-            {activeTab === 'portfolio' && <PortfolioView />}
+            {activeTab === 'portfolio' && <PortfolioView onBackToHome={() => setActiveTab('home')} />}
             {activeTab === 'search' && <SearchView query={searchQuery} />}
           </div>
         </main>

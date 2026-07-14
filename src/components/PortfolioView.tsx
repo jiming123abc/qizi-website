@@ -5,7 +5,11 @@ import { isWeChat, copyToClipboard, setupShareMetadata } from '../lib/shareUtils
 import { ShareHint } from './WeChatShareHint';
 import { getPortfolioItems, getPublicPortfolioItems, getCategoriesWithDetails, getHomeContent, PortfolioItem } from '../data/store';
 
-export function PortfolioView() {
+interface PortfolioViewProps {
+  onBackToHome?: () => void;
+}
+
+export function PortfolioView({ onBackToHome }: PortfolioViewProps) {
   const [activeCategory, setActiveCategory] = useState('全部作品');
   const [selectedItem, setSelectedItem] = useState<PortfolioItem | null>(null);
   const [items, setItems] = useState<PortfolioItem[]>([]);
@@ -16,6 +20,7 @@ export function PortfolioView() {
   const [defaultShareDescription, setDefaultShareDescription] = useState('诚信立足 创新致远');
   const [isWeChatHintVisible, setIsWeChatHintVisible] = useState(false);
   const hasOpenedItemRef = useRef(false);
+  const isFromShareLinkRef = useRef(false);
 
   const updateUrlForShare = (id: number) => {
     const url = new URL(window.location.href);
@@ -59,6 +64,7 @@ export function PortfolioView() {
     if (id && allItems.length > 0) {
       const item = allItems.find(p => p.id.toString() === id);
       if (item) {
+        isFromShareLinkRef.current = true;
         setSelectedItem(item);
       }
     }
@@ -112,6 +118,9 @@ export function PortfolioView() {
   const handleCloseDetail = () => {
     setSelectedItem(null);
     setIsWeChatHintVisible(false);
+    if (isFromShareLinkRef.current && onBackToHome) {
+      onBackToHome();
+    }
   };
 
   const filteredItems = activeCategory === '全部作品' 
