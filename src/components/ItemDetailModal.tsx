@@ -49,6 +49,21 @@ export function ItemDetailModal({ isOpen, onClose, item, onShare }: ItemDetailMo
     }
   }, [item, isOpen]);
 
+  // 视频作品打开时自动播放
+  useEffect(() => {
+    if (isOpen && item) {
+      const isVideo = item.type === 'video' && !!item.videoUrl;
+      if (isVideo && videoRef.current) {
+        // 延迟一帧确保 video 元素已渲染
+        requestAnimationFrame(() => {
+          videoRef.current?.play().catch(() => {
+            // 自动播放可能被浏览器限制（如无声音+用户交互），静默失败
+          });
+        });
+      }
+    }
+  }, [isOpen, item]);
+
   // 安全检查 - 如果item是null，不要渲染复杂内容
   if (!item) {
     return (
